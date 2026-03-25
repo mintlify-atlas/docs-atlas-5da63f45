@@ -1,0 +1,266 @@
+---
+title: 'Habitats'
+description: 'Manage the physical enclosures and zones that house marine animals at the park.'
+keywords: ['habitats', 'enclosures', 'sections', 'marine life']
+---
+
+A **Habitat** represents a physical zone or enclosure within the park where animals live. Each habitat belongs to a **Section** — the top-level organizational area of the park — and tracks how many animals it currently houses.
+
+<Note>
+  All write operations (POST, PUT, DELETE) require authentication via `IsAuthenticatedAndRole`. GET endpoints return data publicly.
+</Note>
+
+---
+
+## Endpoints
+
+### List habitats
+
+Returns all habitats ordered alphabetically by name.
+
+<RequestExample>
+
+```bash GET /api/habitats/
+curl --request GET \
+  --url https://api.parquemarino.org/api/habitats/
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json 200
+[
+  {
+    "id": 1,
+    "name": "Laguna Tropical",
+    "nums_animals": 14,
+    "description": "Warm shallow reef exhibit with coral formations.",
+    "section": 2
+  },
+  {
+    "id": 2,
+    "name": "Océano Abierto",
+    "nums_animals": 6,
+    "description": "Deep-water pelagic zone exhibit.",
+    "section": 1
+  }
+]
+```
+
+</ResponseExample>
+
+#### Response fields
+
+<ResponseField name="id" type="integer" required>
+  Unique identifier for the habitat.
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  Name of the habitat. Maximum 30 characters. Must be unique across all habitats. Records are ordered alphabetically by this field.
+</ResponseField>
+
+<ResponseField name="nums_animals" type="integer" required>
+  Current number of animals housed in this habitat. Must be a positive integer.
+</ResponseField>
+
+<ResponseField name="description" type="string" required>
+  Short description of the habitat. Maximum 100 characters.
+</ResponseField>
+
+<ResponseField name="section" type="integer" required>
+  Foreign key referencing the parent `Sections` record. Deleting a section cascades to its habitats.
+
+  <Expandable title="Section object">
+    <ResponseField name="id" type="integer">
+      Unique identifier for the section.
+    </ResponseField>
+    <ResponseField name="name" type="string">
+      Name of the section. Maximum 30 characters. Must be unique.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+### Create habitat
+
+<Note>Requires admin authentication.</Note>
+
+<ParamField body="name" type="string" required>
+  Name of the habitat. Maximum 30 characters. Must be unique.
+</ParamField>
+
+<ParamField body="nums_animals" type="integer" required>
+  Initial animal count for this habitat. Must be zero or greater.
+</ParamField>
+
+<ParamField body="description" type="string" required>
+  Short description. Maximum 100 characters.
+</ParamField>
+
+<ParamField body="section" type="integer" required>
+  ID of the parent section.
+</ParamField>
+
+<RequestExample>
+
+```bash POST /api/habitats/create/
+curl --request POST \
+  --url https://api.parquemarino.org/api/habitats/create/ \
+  --header 'Authorization: Bearer <token>' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "name": "Zona Manglares",
+    "nums_animals": 8,
+    "description": "Brackish mangrove estuary habitat.",
+    "section": 1
+  }'
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json 201
+{
+  "id": 5,
+  "name": "Zona Manglares",
+  "nums_animals": 8,
+  "description": "Brackish mangrove estuary habitat.",
+  "section": 1
+}
+```
+
+</ResponseExample>
+
+---
+
+### Retrieve habitat
+
+<ParamField path="id" type="integer" required>
+  Primary key of the habitat.
+</ParamField>
+
+<RequestExample>
+
+```bash GET /api/habitats/{id}/
+curl --request GET \
+  --url https://api.parquemarino.org/api/habitats/1/
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json 200
+{
+  "id": 1,
+  "name": "Laguna Tropical",
+  "nums_animals": 14,
+  "description": "Warm shallow reef exhibit with coral formations.",
+  "section": 2
+}
+```
+
+</ResponseExample>
+
+---
+
+### Update habitat
+
+<Note>Requires admin authentication. Only PUT is supported; PATCH is not exposed.</Note>
+
+<ParamField path="id" type="integer" required>
+  Primary key of the habitat to update.
+</ParamField>
+
+<ParamField body="name" type="string" required>
+  Updated habitat name. Maximum 30 characters.
+</ParamField>
+
+<ParamField body="nums_animals" type="integer" required>
+  Updated animal count.
+</ParamField>
+
+<ParamField body="description" type="string" required>
+  Updated description. Maximum 100 characters.
+</ParamField>
+
+<ParamField body="section" type="integer" required>
+  Updated parent section ID.
+</ParamField>
+
+<RequestExample>
+
+```bash PUT /api/habitats/{id}/update/
+curl --request PUT \
+  --url https://api.parquemarino.org/api/habitats/1/update/ \
+  --header 'Authorization: Bearer <token>' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "name": "Laguna Tropical",
+    "nums_animals": 16,
+    "description": "Warm shallow reef exhibit with coral formations.",
+    "section": 2
+  }'
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json 200
+{
+  "id": 1,
+  "name": "Laguna Tropical",
+  "nums_animals": 16,
+  "description": "Warm shallow reef exhibit with coral formations.",
+  "section": 2
+}
+```
+
+</ResponseExample>
+
+---
+
+### Delete habitat
+
+<Warning>
+  Deleting a habitat cascades to all animals that reference it. This action cannot be undone.
+</Warning>
+
+<Note>Requires admin authentication.</Note>
+
+<ParamField path="id" type="integer" required>
+  Primary key of the habitat to delete.
+</ParamField>
+
+<RequestExample>
+
+```bash DELETE /api/habitats/{id}/delete/
+curl --request DELETE \
+  --url https://api.parquemarino.org/api/habitats/1/delete/ \
+  --header 'Authorization: Bearer <token>'
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json 204
+{}
+```
+
+</ResponseExample>
+
+---
+
+## Relationship to species
+
+Habitats do not directly reference species in the data model. The relationship is established through the `Animals` resource: each animal belongs to one habitat and one species. To find all species present in a given habitat, query `/api/animals/?habitat={id}` and inspect the `species` field on each result.
+
+```bash
+# Find all animals (and their species) in habitat 1
+curl 'https://api.parquemarino.org/api/animals/?habitat=1'
+```

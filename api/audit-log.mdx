@@ -1,0 +1,152 @@
+---
+title: 'Audit log'
+description: 'Query the system audit log that records every API request, user action, and data change on the Parque Marino del Pacífico Sur platform.'
+keywords: ['audit log', 'logging', 'admin', 'monitoring', 'history', 'compliance']
+---
+
+<Warning>
+  All audit log endpoints are intended for **admin use only**. The underlying permission class (`IsAuthenticatedAndRole` with `required_role = 'admin'`) restricts access to staff and superuser accounts. Requests from non-admin users will receive a `403 Forbidden` response.
+</Warning>
+
+The audit log captures a record for every HTTP request processed by the platform. The `AuditLogMiddleware` runs on every response and writes one `AuditLog` row containing the authenticated user, the HTTP method and path, the request body, and the response status code and body.
+
+## How audit logging works
+
+The middleware in `api/middleware.py` intercepts every response:
+
+1. Reads `request.user` — stores `null` for unauthenticated requests.
+2. Decodes `request.body` as JSON when possible; falls back to raw text.
+3. Decodes `response.content` as JSON when possible.
+4. Creates one `AuditLog` row with `action = '<METHOD> <path>'`.
+
+In addition to the middleware, Django signals in `purchase_orders/audit.py` write structured JSON entries to `logs/audit.log` via the `purchase_audit` logger for every create, update, and delete on `PurchaseOrders` and `Payments` models.
+
+---
+
+## Endpoints
+
+### GET /api/audit_log/
+
+Returns a paginated list of all audit log entries, ordered by `timestamp` descending.
+
+**Example request**
+
+```bash cURL
+curl --request GET \
+  --url https://api.parquemarino.example.com/api/audit_log/ \
+  --header 'Authorization: Bearer <admin-token>'
+```
+
+**Query parameters**
+
+<ParamField query="user" type="number">
+  Filter entries by user ID. Returns only entries where `user` matches the given ID.
+</ParamField>
+
+<ParamField query="action" type="string">
+  Filter by action string. The value stored is `'<METHOD> <path>'`, for example `POST /api/payments/create/`. Supports partial matching depending on the configured queryset filter.
+</ParamField>
+
+<ParamField query="model" type="string">
+  Filter by model name. The middleware sets this to `'API Request'` for HTTP-level entries. Signal-based entries use the Django model name (e.g. `PurchaseOrders`, `Payments`).
+</ParamField>
+
+<ParamField query="ordering" type="string" default="-timestamp">
+  Field to sort by. Entries default to newest first (`-timestamp`).
+</ParamField>
+
+**Response fields**
+
+<ResponseField name="id" type="number" required>
+  Auto-incremented primary key for the log entry.
+</ResponseField>
+
+<ResponseField name="timestamp" type="string" required>
+  ISO 8601 datetime when the entry was created. Automatically set on insert.
+</ResponseField>
+
+<ResponseField name="user" type="number | null" required>
+  Foreign key to the Django `auth_user` table. `null` for unauthenticated requests.
+</ResponseField>
+
+<ResponseField name="action" type="string" required>
+  Description of the action performed. For HTTP-level entries the format is `'<METHOD> <path>'`, e.g. `GET /api/payments/methods/`.
+</ResponseField>
+
+<ResponseField name="model" type="string" required>
+  Name of the model or resource affected. Set to `'API Request'` by the middleware for all HTTP traffic.
+</ResponseField>
+
+<ResponseField name="record_id" type="number | null" required>
+  Primary key of the affected record when the action targets a specific object. `null` for list operations or middleware-generated entries.
+</ResponseField>
+
+<ResponseField name="details" type="string | null" required>
+  Free-text field containing additional context. The middleware stores the full request body, response HTTP status code, and response body here.
+</ResponseField>
+
+<ResponseExample>
+
+```json 200
+[
+  {
+    "id": 1042,
+    "timestamp": "2026-03-25T14:30:05.123456Z",
+    "user": 3,
+    "action": "POST /api/payments/create/",
+    "model": "API Request",
+    "record_id": null,
+    "details": "Request Body: {'purchase_order': 42, 'payment_method': 'SINPE', 'transaction_id': 'SINPE-20260325-001', 'status': 'SUCCESS'}, Response Code: 201, Response Body: {'id': 7, 'purchase_order': 42, 'status': 'SUCCESS'}"
+  },
+  {
+    "id": 1041,
+    "timestamp": "2026-03-25T14:29:51.004100Z",
+    "user": null,
+    "action": "GET /api/payments/methods/",
+    "model": "API Request",
+    "record_id": null,
+    "details": "Request Body: None, Response Code: 200, Response Body: {'payment_methods': [...], 'total_methods': 5}"
+  }
+]
+```
+
+</ResponseExample>
+
+### GET /api/audit_log/{id}/
+
+Retrieve a single audit log entry by its primary key.
+
+<ParamField path="id" type="number" required>
+  Primary key of the audit log entry.
+</ParamField>
+
+---
+
+## Log file output
+
+In addition to the database table, the logging subsystem (`api/logging_config.py`) writes to rotating log files on disk:
+
+| Logger name | File | Max size | Backups |
+|---|---|---|---|
+| `audit` | `logs/audit.log` | 20 MB | 10 |
+| `purchase_audit` | structured JSON via `audit_logger` | — | — |
+| `payments` | `logs/payments.log` | 10 MB | 5 |
+| `purchase_orders` | `logs/purchase_orders.log` | 10 MB | 5 |
+
+The detailed formatter used for these files includes module name, function name, and line number:
+
+```
+%(asctime)s - %(name)s - %(levelname)s - %(module)s - %(funcName)s:%(lineno)d - %(message)s
+```
+
+---
+
+## Version tracking
+
+The platform uses **django-reversion** for model-level version tracking. This provides a complete change history for any model registered with `reversion`, allowing admins to view diffs between versions and revert records to a previous state through the Django admin interface.
+
+---
+
+## Admin UI
+
+The `Admin > Logs` page in the frontend (`src/pages/Admin/Logs.jsx`) fetches from `/api/admin/audit-logs/` and displays a table with the `id`, `user`, `action`, and `timestamp` columns. This view is accessible only to authenticated admin users.

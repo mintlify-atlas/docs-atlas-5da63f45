@@ -1,0 +1,639 @@
+---
+title: 'Authentication'
+description: 'JWT-based authentication endpoints for the Parque Marino del Pacífico Sur API.'
+sidebarTitle: 'Authentication'
+icon: 'lock'
+keywords: ['authentication', 'login', 'JWT', 'token', 'register', 'logout', 'password reset']
+---
+
+## Overview
+
+The API uses **JWT (JSON Web Token)** authentication powered by [djangorestframework-simplejwt](https://django-rest-framework-simplejwt.readthedocs.io/). All protected endpoints require a valid access token passed in the `Authorization` header.
+
+The frontend stores the access token in a cookie (`accessToken`) and silently refreshes it every **4 minutes** using the refresh token (`refreshToken`). Access tokens expire after **1 day**; refresh tokens expire after **7 days**.
+
+### How to authenticate requests
+
+Include the `Authorization` header with every request to a protected endpoint:
+
+```http
+Authorization: Bearer <your_access_token>
+```
+
+### Access levels
+
+| Level | Permission class | Description |
+|---|---|---|
+| Public | `AllowAny` | No authentication required |
+| Authenticated | `IsAuthenticated` | Valid access token required |
+| Role-restricted | `IsAuthenticatedAndRole` | Authenticated + member of a specific Django group |
+
+<Note>
+  The `IsAuthenticatedAndRole` permission class checks `request.user.groups`. Set `required_role` on the view to restrict access to a named group. If `required_role` is not set, authentication alone is sufficient.
+</Note>
+
+---
+
+## POST /api/auth/token/
+
+Obtain a JWT access and refresh token pair. This is the primary login endpoint used by the frontend. Accepts username or email in the `username` field.
+
+<Note>
+  The frontend sends credentials to `/api/auth/token/` (not `/api/auth/login/`) to receive JWT tokens. The `/api/auth/login/` endpoint performs a Django session login and returns user data without issuing JWT tokens.
+</Note>
+
+### Request body
+
+<ParamField body="username" type="string" required>
+  The user's username. The custom token serializer looks up the user by exact username match.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  The user's password.
+</ParamField>
+
+### Response
+
+<ResponseField name="access" type="string" required>
+  Short-lived JWT access token. Valid for 1 day. Contains `username` and `email` claims in addition to standard JWT fields.
+</ResponseField>
+
+<ResponseField name="refresh" type="string" required>
+  Long-lived JWT refresh token. Valid for 7 days. Use this to obtain a new access token without re-entering credentials.
+</ResponseField>
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://your-api.example.com/api/auth/token/ \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "username": "juanperez",
+    "password": "secretpassword"
+  }'
+```
+
+```javascript JavaScript (fetch)
+const response = await fetch('https://your-api.example.com/api/auth/token/', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    username: 'juanperez',
+    password: 'secretpassword',
+  }),
+});
+
+const { access, refresh } = await response.json();
+```
+
+```javascript JavaScript (axios)
+import axios from 'axios';
+
+const { data } = await axios.post('/api/auth/token/', {
+  username: 'juanperez',
+  password: 'secretpassword',
+});
+
+const { access, refresh } = data;
+```
+
+</CodeGroup>
+
+**200 response**
+
+```json
+{
+  "access": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+**400 response** — invalid credentials
+
+```json
+{
+  "detail": "No active account found with the given credentials"
+}
+```
+
+---
+
+## POST /api/auth/token/refresh/
+
+Exchange a valid refresh token for a new access token. The frontend calls this endpoint automatically every 4 minutes to keep sessions alive.
+
+### Request body
+
+<ParamField body="refresh" type="string" required>
+  A valid, unexpired refresh token obtained from `/api/auth/token/`.
+</ParamField>
+
+### Response
+
+<ResponseField name="access" type="string" required>
+  A new JWT access token.
+</ResponseField>
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://your-api.example.com/api/auth/token/refresh/ \
+  --header 'Content-Type: application/json' \
+  --data '{"refresh": "<your_refresh_token>"}'
+```
+
+```javascript JavaScript (fetch)
+const response = await fetch('https://your-api.example.com/api/auth/token/refresh/', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ refresh: refreshToken }),
+});
+
+const { access } = await response.json();
+```
+
+</CodeGroup>
+
+**200 response**
+
+```json
+{
+  "access": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+**401 response** — expired or invalid refresh token
+
+```json
+{
+  "detail": "Token is invalid or expired",
+  "code": "token_not_valid"
+}
+```
+
+<Warning>
+  When the refresh token is missing or invalid, the frontend calls `logout()` and clears all stored tokens. Users must re-authenticate.
+</Warning>
+
+---
+
+## POST /api/auth/login/
+
+Authenticates a user via Django session login and returns structured user data. Supports login with either **username** or **email** in the `username` field.
+
+<Note>
+  This endpoint does not issue JWT tokens. For JWT-based auth (the default frontend flow), use `POST /api/auth/token/` instead. Use this endpoint when you need the full user object (groups, flags) without a separate profile fetch.
+</Note>
+
+### Request body
+
+<ParamField body="username" type="string" required>
+  The user's username **or** email address. The serializer searches by username first, then by `User.email`, then by `UserProfile.email`.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  The user's password.
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string" required>
+  `"Login exitoso"` on success.
+</ResponseField>
+
+<ResponseField name="user" type="object" required>
+  <Expandable title="user object">
+    <ResponseField name="user_id" type="integer">
+      The user's primary key.
+    </ResponseField>
+    <ResponseField name="username" type="string">
+      The user's username.
+    </ResponseField>
+    <ResponseField name="email" type="string">
+      The user's email address.
+    </ResponseField>
+    <ResponseField name="first_name" type="string">
+      Given name.
+    </ResponseField>
+    <ResponseField name="last_name" type="string">
+      Family name.
+    </ResponseField>
+    <ResponseField name="is_staff" type="boolean">
+      Whether the user has Django admin (staff) access.
+    </ResponseField>
+    <ResponseField name="is_superuser" type="boolean">
+      Whether the user has superuser privileges.
+    </ResponseField>
+    <ResponseField name="groups" type="string[]">
+      List of group/role names the user belongs to.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<CodeGroup>
+
+```bash cURL
+# Login with username
+curl --request POST \
+  --url https://your-api.example.com/api/auth/login/ \
+  --header 'Content-Type: application/json' \
+  --data '{"username": "juanperez", "password": "secretpassword"}'
+
+# Login with email
+curl --request POST \
+  --url https://your-api.example.com/api/auth/login/ \
+  --header 'Content-Type: application/json' \
+  --data '{"username": "juan@example.com", "password": "secretpassword"}'
+```
+
+```javascript JavaScript (fetch)
+const response = await fetch('https://your-api.example.com/api/auth/login/', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    username: 'juan@example.com', // email also accepted
+    password: 'secretpassword',
+  }),
+});
+
+const { message, user } = await response.json();
+```
+
+</CodeGroup>
+
+**200 response**
+
+```json
+{
+  "message": "Login exitoso",
+  "user": {
+    "user_id": 1,
+    "username": "juanperez",
+    "email": "juan@example.com",
+    "first_name": "Juan",
+    "last_name": "Pérez",
+    "is_staff": false,
+    "is_superuser": false,
+    "groups": ["client"]
+  }
+}
+```
+
+**400 response** — invalid credentials
+
+```json
+{
+  "error": "Credenciales inválidas",
+  "details": {
+    "non_field_errors": ["Credenciales inválidas. Verifica tu usuario/email y contraseña."]
+  }
+}
+```
+
+**400 response** — account disabled
+
+```json
+{
+  "error": "Credenciales inválidas",
+  "details": {
+    "non_field_errors": ["Esta cuenta está desactivada."]
+  }
+}
+```
+
+---
+
+## POST /api/auth/register/
+
+Creates a new user account with an optional extended profile. Accepts `multipart/form-data` to support profile picture uploads.
+
+The role field (`roles`) is sent at the root level — not nested under `profile`. The frontend defaults new registrations to the `client` role.
+
+### Request body
+
+<ParamField body="username" type="string" required>
+  Unique username for the new account.
+</ParamField>
+
+<ParamField body="email" type="string" required>
+  Email address for the account.
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  Password for the account.
+</ParamField>
+
+<ParamField body="first_name" type="string">
+  User's given name.
+</ParamField>
+
+<ParamField body="last_name" type="string">
+  User's family name.
+</ParamField>
+
+<ParamField body="roles" type="integer[]">
+  List of Django group IDs to assign to the user. Defaults to `client` role if omitted.
+</ParamField>
+
+<ParamField body="profile.phone" type="string">
+  Contact phone number (max 20 characters).
+</ParamField>
+
+<ParamField body="profile.address" type="string">
+  Street address (max 255 characters).
+</ParamField>
+
+<ParamField body="profile.birth_date" type="string">
+  Date of birth in `YYYY-MM-DD` format.
+</ParamField>
+
+<ParamField body="profile.province" type="integer">
+  ID of the user's province.
+</ParamField>
+
+<ParamField body="profile.bio" type="string">
+  Short biography.
+</ParamField>
+
+<ParamField body="profile.profile_picture" type="file">
+  Profile image file. Accepted formats: any image type. Stored under `profile_pics/`.
+</ParamField>
+
+### Response
+
+Returns the created user object (`RegisterSerializer` output).
+
+<ResponseField name="username" type="string" required />
+<ResponseField name="email" type="string" required />
+<ResponseField name="first_name" type="string" />
+<ResponseField name="last_name" type="string" />
+<ResponseField name="roles" type="integer[]">
+  List of group IDs assigned to the user.
+</ResponseField>
+<ResponseField name="profile" type="object">
+  The extended profile object if profile data was provided.
+</ResponseField>
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://your-api.example.com/api/auth/register/ \
+  --form 'username=juanperez' \
+  --form 'email=juan@example.com' \
+  --form 'password=secretpassword' \
+  --form 'first_name=Juan' \
+  --form 'last_name=Pérez' \
+  --form 'roles=2' \
+  --form 'profile.phone=+506 8888-1234' \
+  --form 'profile.birth_date=1990-05-15' \
+  --form 'profile.province=1' \
+  --form 'profile.profile_picture=@/path/to/photo.jpg'
+```
+
+```javascript JavaScript (fetch)
+const formData = new FormData();
+formData.append('username', 'juanperez');
+formData.append('email', 'juan@example.com');
+formData.append('password', 'secretpassword');
+formData.append('first_name', 'Juan');
+formData.append('last_name', 'Pérez');
+formData.append('roles', 2); // role ID
+formData.append('profile.phone', '+506 8888-1234');
+formData.append('profile.birth_date', '1990-05-15');
+formData.append('profile.province', 1);
+formData.append('profile.profile_picture', fileInput.files[0]);
+
+const response = await fetch('https://your-api.example.com/api/auth/register/', {
+  method: 'POST',
+  body: formData, // Do not set Content-Type header — the browser sets it with the boundary
+});
+```
+
+</CodeGroup>
+
+**201 response**
+
+```json
+{
+  "username": "juanperez",
+  "email": "juan@example.com",
+  "first_name": "Juan",
+  "last_name": "Pérez",
+  "roles": [2],
+  "profile": {
+    "username": "juanperez",
+    "email": "juan@example.com",
+    "phone": "+506 8888-1234",
+    "birth_date": "1990-05-15",
+    "province": 1
+  }
+}
+```
+
+---
+
+## POST /api/auth/logout/
+
+Closes the current Django session. The frontend also calls this endpoint when clearing JWT cookies, sending the `refresh_token` in the request body.
+
+### Request body
+
+<ParamField body="refresh_token" type="string">
+  The current refresh token. Included by the frontend when logging out to allow server-side token invalidation if implemented.
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string" required>
+  `"Logout exitoso"` on success.
+</ResponseField>
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://your-api.example.com/api/auth/logout/ \
+  --header 'Authorization: Bearer <your_access_token>' \
+  --header 'Content-Type: application/json' \
+  --data '{"refresh_token": "<your_refresh_token>"}'
+```
+
+```javascript JavaScript (fetch)
+const response = await fetch('https://your-api.example.com/api/auth/logout/', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${accessToken}`,
+  },
+  body: JSON.stringify({ refresh_token: refreshToken }),
+});
+```
+
+</CodeGroup>
+
+**200 response**
+
+```json
+{
+  "message": "Logout exitoso"
+}
+```
+
+---
+
+## POST /api/auth/forgot-password/
+
+Looks up a user by email and returns a password reset token and UID. The client uses these values to call `POST /api/auth/reset-password-confirm/`.
+
+<Warning>
+  The current implementation returns the `reset_link`, `uid`, and `token` directly in the response body rather than sending an email. Do not expose this response payload to end users in a production environment without adding email delivery.
+</Warning>
+
+### Request body
+
+<ParamField body="email" type="string" required>
+  The email address associated with the account to reset.
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string">
+  `"Password reset link generated."`
+</ResponseField>
+
+<ResponseField name="reset_link" type="string">
+  Frontend path with `uid` and `token` query parameters: `/reset-password-confirm/?uid=<uid>&token=<token>`
+</ResponseField>
+
+<ResponseField name="uid" type="string">
+  URL-safe base64-encoded user primary key. Pass this to `/api/auth/reset-password-confirm/`.
+</ResponseField>
+
+<ResponseField name="token" type="string">
+  Django password reset token. Single-use; expires after Django's default token timeout.
+</ResponseField>
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://your-api.example.com/api/auth/forgot-password/ \
+  --header 'Content-Type: application/json' \
+  --data '{"email": "juan@example.com"}'
+```
+
+```javascript JavaScript (fetch)
+const response = await fetch('https://your-api.example.com/api/auth/forgot-password/', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ email: 'juan@example.com' }),
+});
+
+const { uid, token } = await response.json();
+// Then call reset-password-confirm with uid, token, and new_password
+```
+
+</CodeGroup>
+
+**200 response**
+
+```json
+{
+  "message": "Password reset link generated.",
+  "reset_link": "/reset-password-confirm/?uid=MQ&token=bpe4fs-...",
+  "uid": "MQ",
+  "token": "bpe4fs-9e83fa..."
+}
+```
+
+**400 response** — email not found
+
+```json
+{
+  "error": "No user found with this email."
+}
+```
+
+---
+
+## POST /api/auth/reset-password-confirm/
+
+Resets a user's password using the `uid` and `token` received from `/api/auth/forgot-password/`.
+
+<Warning>
+  This token is single-use. Once the password is reset successfully, the token cannot be reused.
+</Warning>
+
+### Request body
+
+<ParamField body="uid" type="string" required>
+  URL-safe base64-encoded user primary key from the forgot-password response.
+</ParamField>
+
+<ParamField body="token" type="string" required>
+  The password reset token from the forgot-password response.
+</ParamField>
+
+<ParamField body="new_password" type="string" required>
+  The new password to set for the account.
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string" required>
+  `"Password has been reset successfully."`
+</ResponseField>
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url https://your-api.example.com/api/auth/reset-password-confirm/ \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "uid": "MQ",
+    "token": "bpe4fs-9e83fa...",
+    "new_password": "newStrongPassword!"
+  }'
+```
+
+```javascript JavaScript (fetch)
+const response = await fetch('https://your-api.example.com/api/auth/reset-password-confirm/', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    uid,
+    token,
+    new_password: 'newStrongPassword!',
+  }),
+});
+```
+
+</CodeGroup>
+
+**200 response**
+
+```json
+{
+  "message": "Password has been reset successfully."
+}
+```
+
+**400 response** — invalid or expired token
+
+```json
+{
+  "error": "Invalid or expired token."
+}
+```
+
+**400 response** — missing fields
+
+```json
+{
+  "error": "Missing required fields."
+}
+```

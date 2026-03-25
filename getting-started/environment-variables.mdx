@@ -1,0 +1,198 @@
+---
+title: 'Environment variables'
+description: 'Complete reference for all environment variables required by the Parque Marino del Pacífico Sur backend and frontend.'
+keywords: ['environment variables', 'configuration', 'env', 'django', 'vite', 'emailjs', 'paypal', 'supabase']
+---
+
+The project is configured entirely through environment variables. No secrets or environment-specific values should be hardcoded in source files.
+
+## Backend (`config/.env`)
+
+The Django backend reads its configuration from `backend/config/.env` using `python-dotenv`. A default file is committed for development convenience.
+
+### Django core
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `DJANGO_SECRET_KEY` | Yes | insecure dev key | Django's cryptographic signing key. Must be long, random, and unique per environment. |
+| `DJANGO_DEBUG` | Yes | `True` | Set to `False` in production to disable the debug toolbar and detailed error pages. |
+| `DJANGO_ALLOWED_HOSTS` | Yes | `localhost,127.0.0.1` | Comma-separated list of hostnames Django will serve. Add your production domain here. |
+
+### Database
+
+The project defaults to SQLite for development. Switch to MySQL for production by updating these variables **and** uncommenting the MySQL `DATABASES` block in `config/settings.py`.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `DATABASE_ENGINE` | No | `django.db.backends.sqlite3` | Django database backend. Use `django.db.backends.mysql` for production. |
+| `DATABASE_NAME` | No | `parque_marino_db.sqlite3` | Database name (filename for SQLite, schema name for MySQL). |
+| `DATABASE_USER` | MySQL only | — | MySQL username. |
+| `DATABASE_PASSWORD` | MySQL only | — | MySQL password. |
+| `DATABASE_HOST` | MySQL only | `localhost` | MySQL server hostname. |
+| `DATABASE_PORT` | MySQL only | `3306` | MySQL server port. |
+
+### CORS
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `DJANGO_CORS_ALLOWED_ORIGINS` | No | see below | Comma-separated list of allowed CORS origins. Defaults to `http://localhost:5173`, `http://127.0.0.1:5173`, `http://localhost:3000`, `http://127.0.0.1:3000`. |
+
+<Note>
+  `CORS_ALLOW_CREDENTIALS` is hardcoded to `True` in `config/settings.py`. This is required for JWT cookie-based authentication to work correctly with the frontend.
+</Note>
+
+### JWT
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `JWT_ACCESS_TOKEN_LIFETIME_MINUTES` | No | `5` | Access token validity in minutes. |
+| `JWT_REFRESH_TOKEN_LIFETIME_DAYS` | No | `1` | Refresh token validity in days. |
+| `JWT_ALGORITHM` | No | `HS256` | Signing algorithm. |
+
+### Supabase Storage (optional)
+
+Required only if you are using Supabase as the media file storage backend. See `backend/SUPABASE_STORAGE_README.md` for full setup instructions.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `SUPABASE_URL` | Supabase only | — | Your Supabase project URL (e.g. `https://abc123.supabase.co`). |
+| `SUPABASE_API_KEY` | Supabase only | — | Supabase anonymous (public) key. |
+| `SUPABASE_SERVICE_KEY` | Supabase only | — | Supabase service role key. Used for administrative storage operations. |
+| `SUPABASE_STORAGE_BUCKET` | Supabase only | `media-files` | Name of the default storage bucket. |
+| `ENVIRONMENT` | Supabase only | `development` | Set to `production` to activate Supabase storage instead of the local filesystem. |
+
+### Email (optional)
+
+Uncomment these variables in `config/.env` to enable Django's SMTP email backend for system notifications.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `EMAIL_BACKEND` | No | — | Set to `django.core.mail.backends.smtp.EmailBackend` to enable SMTP. |
+| `EMAIL_HOST` | No | — | SMTP server hostname (e.g. `smtp.gmail.com`). |
+| `EMAIL_PORT` | No | — | SMTP port (typically `587` for TLS). |
+| `EMAIL_USE_TLS` | No | — | Set to `True` for TLS-encrypted connections. |
+| `EMAIL_HOST_USER` | No | — | SMTP account email address. |
+| `EMAIL_HOST_PASSWORD` | No | — | SMTP account password or app-specific password. |
+
+---
+
+## Frontend (`.env`)
+
+The Vite frontend reads variables prefixed with `VITE_` from a `.env` file in the `frontend/` directory. Create this file manually — there is no `.env.example` committed to the repository.
+
+<Warning>
+  Only variables prefixed with `VITE_` are exposed to the browser bundle. Never put server-side secrets in frontend environment variables.
+</Warning>
+
+### Backend connection
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `VITE_BACKEND_URL` | No | `http://localhost:8000` | Base URL of the Django API. Used to construct media file URLs (e.g. QR code images). The Axios instance in `src/api/axiosInstance.js` defaults to `http://127.0.0.1:8000/` and should be updated to read from this variable for multi-environment support. |
+
+### EmailJS
+
+The frontend sends invoice emails directly from the browser using [EmailJS](https://www.emailjs.com/). Configure a service and template in your EmailJS account, then set these variables.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `VITE_EMAILJS_SERVICE_ID` | Yes | — | EmailJS service ID (e.g. `service_ke9gzcs`). Found in your EmailJS dashboard under **Email Services**. |
+| `VITE_EMAILJS_TEMPLATE_ID` | Yes | — | Primary template ID for invoice emails (e.g. `template_factura`). |
+| `VITE_EMAILJS_PUBLIC_KEY` | Yes | — | EmailJS public key (e.g. `3mQx8AVIUbbufg0BX`). Found in **Account** → **General**. |
+
+<Note>
+  The current codebase has the EmailJS credentials hardcoded in `src/services/emailInvoiceService.js`. Move them to environment variables for proper secret management in production.
+</Note>
+
+### PayPal
+
+The PayPal SDK is loaded as a `<script>` tag in `frontend/index.html` rather than via an environment variable. To update the client ID:
+
+```html frontend/index.html
+<script src="https://www.paypal.com/sdk/js?client-id=YOUR_PAYPAL_CLIENT_ID"></script>
+```
+
+Replace `YOUR_PAYPAL_CLIENT_ID` with your sandbox or live client ID from the [PayPal Developer Dashboard](https://developer.paypal.com/dashboard/).
+
+---
+
+## Complete `.env` examples
+
+<CodeGroup>
+
+```env backend/config/.env (development)
+# Django core
+DJANGO_SECRET_KEY='django-insecure-replace-this-in-production'
+DJANGO_DEBUG=True
+DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
+
+# Database — SQLite
+DATABASE_ENGINE=django.db.backends.sqlite3
+DATABASE_NAME=parque_marino_db.sqlite3
+
+# CORS
+DJANGO_CORS_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+
+# JWT
+JWT_ACCESS_TOKEN_LIFETIME_MINUTES=5
+JWT_REFRESH_TOKEN_LIFETIME_DAYS=1
+JWT_ALGORITHM=HS256
+```
+
+```env backend/config/.env (production)
+# Django core
+DJANGO_SECRET_KEY='your-long-random-production-secret-key'
+DJANGO_DEBUG=False
+DJANGO_ALLOWED_HOSTS=parquemarino.example.com
+
+# Database — MySQL
+DATABASE_ENGINE=django.db.backends.mysql
+DATABASE_NAME=parque_marino_db
+DATABASE_USER=dbuser
+DATABASE_PASSWORD=strongpassword
+DATABASE_HOST=db.example.com
+DATABASE_PORT=3306
+
+# CORS
+DJANGO_CORS_ALLOWED_ORIGINS=https://parquemarino.example.com
+
+# JWT
+JWT_ACCESS_TOKEN_LIFETIME_MINUTES=5
+JWT_REFRESH_TOKEN_LIFETIME_DAYS=1
+JWT_ALGORITHM=HS256
+
+# Supabase Storage
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_API_KEY=your-anon-key
+SUPABASE_SERVICE_KEY=your-service-key
+SUPABASE_STORAGE_BUCKET=media-files
+ENVIRONMENT=production
+```
+
+```env frontend/.env
+# Backend
+VITE_BACKEND_URL=http://localhost:8000
+
+# EmailJS
+VITE_EMAILJS_SERVICE_ID=service_ke9gzcs
+VITE_EMAILJS_TEMPLATE_ID=template_factura
+VITE_EMAILJS_PUBLIC_KEY=your_emailjs_public_key
+```
+
+</CodeGroup>
+
+---
+
+## Security checklist
+
+<Warning>
+  Review this checklist before deploying to a production or shared environment.
+</Warning>
+
+- `DJANGO_SECRET_KEY` is a strong, randomly generated value unique to this environment
+- `DJANGO_DEBUG` is set to `False`
+- `DJANGO_ALLOWED_HOSTS` contains only your actual production hostname(s)
+- `DATABASE_PASSWORD` is a strong, unique credential not shared with other services
+- `SUPABASE_SERVICE_KEY` is kept server-side only and never exposed to the browser
+- The `config/.env` file is listed in `.gitignore` and has never been committed with real credentials
+- The PayPal `client-id` in `index.html` is your **live** client ID, not the sandbox one

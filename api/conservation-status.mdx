@@ -1,0 +1,235 @@
+---
+title: 'Conservation status'
+description: 'Manage IUCN-aligned conservation status categories assigned to animals in the park.'
+keywords: ['conservation', 'IUCN', 'endangered', 'vulnerable', 'threatened', 'marine life']
+---
+
+The **ConservationStatus** resource stores the IUCN Red List categories used to classify the threat level of each animal species in the park. Every `Animals` record must reference one of these statuses.
+
+<Info>
+  Status codes follow the [IUCN Red List](https://www.iucnredlist.org/) classification system. The `name` field stores the two-letter code; the API returns the full human-readable label via `get_name_display()`.
+</Info>
+
+<Note>
+  Write operations (POST, PUT, DELETE) require authentication via `IsAuthenticatedAndRole`. GET endpoints are publicly accessible.
+</Note>
+
+---
+
+## IUCN categories
+
+The following categories are defined in the model's `STATUS_CHOICES`:
+
+| Code | Label                |
+| ---- | -------------------- |
+| `LC` | Least Concern        |
+| `NT` | Near Threatened      |
+| `VU` | Vulnerable           |
+| `EN` | Endangered           |
+| `CR` | Critically Endangered |
+| `EW` | Extinct in the Wild  |
+| `EX` | Extinct              |
+
+---
+
+## Endpoints
+
+### List conservation statuses
+
+Returns all conservation status records ordered alphabetically by code.
+
+<RequestExample>
+
+```bash GET /api/conservation_status/
+curl --request GET \
+  --url https://api.parquemarino.org/api/conservation_status/
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json 200
+[
+  {
+    "id": 1,
+    "name": "CR"
+  },
+  {
+    "id": 2,
+    "name": "EN"
+  },
+  {
+    "id": 3,
+    "name": "EW"
+  },
+  {
+    "id": 4,
+    "name": "EX"
+  },
+  {
+    "id": 5,
+    "name": "LC"
+  },
+  {
+    "id": 6,
+    "name": "NT"
+  },
+  {
+    "id": 7,
+    "name": "VU"
+  }
+]
+```
+
+</ResponseExample>
+
+#### Response fields
+
+<ResponseField name="id" type="integer" required>
+  Unique identifier for the conservation status record.
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  Two-letter IUCN code (e.g., `"EN"`, `"VU"`). Must be unique. Valid values are `LC`, `NT`, `VU`, `EN`, `CR`, `EW`, and `EX`. Records are ordered alphabetically by this field.
+</ResponseField>
+
+---
+
+### Create conservation status
+
+<Note>Requires admin authentication. Only one record per IUCN code is permitted — `name` has a unique constraint.</Note>
+
+<ParamField body="name" type="string" required>
+  Two-letter IUCN code. Must be one of: `LC`, `NT`, `VU`, `EN`, `CR`, `EW`, `EX`.
+</ParamField>
+
+<RequestExample>
+
+```bash POST /api/conservation_status/create/
+curl --request POST \
+  --url https://api.parquemarino.org/api/conservation_status/create/ \
+  --header 'Authorization: Bearer <token>' \
+  --header 'Content-Type: application/json' \
+  --data '{"name": "VU"}'
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json 201
+{
+  "id": 7,
+  "name": "VU"
+}
+```
+
+```json 400
+{
+  "name": ["conservation status with this Conservation Status already exists."]
+}
+```
+
+</ResponseExample>
+
+---
+
+### Retrieve conservation status
+
+<ParamField path="id" type="integer" required>
+  Primary key of the conservation status record.
+</ParamField>
+
+<RequestExample>
+
+```bash GET /api/conservation_status/{id}/
+curl --request GET \
+  --url https://api.parquemarino.org/api/conservation_status/2/
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json 200
+{
+  "id": 2,
+  "name": "EN"
+}
+```
+
+</ResponseExample>
+
+---
+
+### Update conservation status
+
+<Note>Requires admin authentication. Only PUT is supported; PATCH is not exposed.</Note>
+
+<Warning>
+  Changing a status code affects all animals that reference this record. Review animal assignments before updating.
+</Warning>
+
+<ParamField path="id" type="integer" required>
+  Primary key of the status record to update.
+</ParamField>
+
+<ParamField body="name" type="string" required>
+  Replacement IUCN code. Must be one of the valid choices and must remain unique.
+</ParamField>
+
+<RequestExample>
+
+```bash PUT /api/conservation_status/{id}/update/
+curl --request PUT \
+  --url https://api.parquemarino.org/api/conservation_status/2/update/ \
+  --header 'Authorization: Bearer <token>' \
+  --header 'Content-Type: application/json' \
+  --data '{"name": "CR"}'
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json 200
+{
+  "id": 2,
+  "name": "CR"
+}
+```
+
+</ResponseExample>
+
+---
+
+### Delete conservation status
+
+<Warning>
+  Deleting a conservation status cascades to all animals that reference it. This action cannot be undone.
+</Warning>
+
+<Note>Requires admin authentication.</Note>
+
+<ParamField path="id" type="integer" required>
+  Primary key of the conservation status record to delete.
+</ParamField>
+
+<RequestExample>
+
+```bash DELETE /api/conservation_status/{id}/delete/
+curl --request DELETE \
+  --url https://api.parquemarino.org/api/conservation_status/7/delete/ \
+  --header 'Authorization: Bearer <token>'
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json 204
+{}
+```
+
+</ResponseExample>

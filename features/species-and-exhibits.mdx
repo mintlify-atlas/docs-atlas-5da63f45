@@ -1,0 +1,182 @@
+---
+title: 'Species and exhibits'
+description: 'Marine species database, habitat tracking, conservation status catalogue, exhibition management, and educational services at Parque Marino del Pacífico Sur.'
+keywords: ['species', 'marine animals', 'exhibits', 'habitats', 'conservation status', 'educación']
+---
+
+The platform maintains a relational database of marine animals, classified by species, habitat, and IUCN conservation status. These records power both the public exhibits pages and the admin CRUD interface.
+
+<CardGroup cols={2}>
+  <Card title="Species catalogue" icon="fish">
+    Each species has a common name, scientific name, description, and an optional image. The catalogue is managed via the admin dashboard and exposed through a public REST API.
+  </Card>
+  <Card title="Animal records" icon="database">
+    Individual animals are linked to a species, a habitat, and a conservation status. Records are ordered alphabetically by name.
+  </Card>
+  <Card title="Habitats" icon="map">
+    Habitats group animals by physical environment and park section. Each habitat tracks an animal count and belongs to a named section of the park.
+  </Card>
+  <Card title="Exhibitions" icon="layout-panel-left">
+    Exhibition entries are database-driven. Each exhibit has images, descriptive facts, and action buttons managed through the admin panel.
+  </Card>
+</CardGroup>
+
+## Data models
+
+### Species
+
+```python
+# backend/api/species/models.py
+class Species(models.Model):
+    name            = models.CharField(max_length=30, unique=True)
+    scientific_name = models.CharField(max_length=100, blank=True, null=True)
+    description     = models.TextField(blank=True, null=True)
+    img             = models.ImageField(upload_to='species/', blank=True, null=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def get_image_url(self):
+        return self.img.url if self.img else None
+```
+
+### Animals
+
+```python
+# backend/api/animales/models.py
+class Animals(models.Model):
+    name                 = models.CharField(max_length=30)
+    age                  = models.PositiveIntegerField()
+    species              = models.ForeignKey('Species', on_delete=models.CASCADE, related_name='animals')
+    conservation_status  = models.ForeignKey('ConservationStatus', on_delete=models.CASCADE, related_name='animals')
+    habitat              = models.ForeignKey('Habitats', on_delete=models.CASCADE, related_name='animals')
+
+    class Meta:
+        ordering = ['name']
+```
+
+### Conservation status
+
+The platform follows IUCN Red List codes:
+
+```python
+# backend/api/conservation_status/models.py
+class ConservationStatus(models.Model):
+    STATUS_CHOICES = [
+        ("LC", "Least Concern"),
+        ("NT", "Near Threatened"),
+        ("VU", "Vulnerable"),
+        ("EN", "Endangered"),
+        ("CR", "Critically Endangered"),
+        ("EW", "Extinct in the Wild"),
+        ("EX", "Extinct"),
+    ]
+    name = models.CharField(max_length=30, choices=STATUS_CHOICES, unique=True)
+```
+
+### Habitats
+
+```python
+# backend/api/habitats/models.py
+class Habitats(models.Model):
+    name         = models.CharField(max_length=30, unique=True)
+    nums_animals = models.PositiveIntegerField()
+    description  = models.CharField(max_length=100)
+    section      = models.ForeignKey('Sections', on_delete=models.CASCADE, related_name='habitats')
+
+    class Meta:
+        ordering = ['name']
+```
+
+### Exhibitions
+
+```python
+# backend/api/exhibiciones/models.py
+class Exhibicion(models.Model):
+    value = models.CharField(max_length=30, unique=True)
+    label = models.CharField(max_length=30, unique=True)
+    title = models.CharField(max_length=30, unique=True)
+
+class ExhibicionImage(models.Model):
+    exhibicion = models.ForeignKey(Exhibicion, related_name='images', on_delete=models.CASCADE)
+    image      = models.ImageField(upload_to='exhibitions/')
+
+class ExhibicionFacts(models.Model):
+    exhibicion = models.ForeignKey(Exhibicion, related_name='facts', on_delete=models.CASCADE)
+    fact       = models.TextField()
+
+class ExhibicionDescription(models.Model):
+    exhibicion  = models.ForeignKey(Exhibicion, related_name='descriptions', on_delete=models.CASCADE)
+    description = models.TextField()
+
+class ExhibicionButtons(models.Model):
+    exhibicion = models.ForeignKey(Exhibicion, related_name='buttons', on_delete=models.CASCADE)
+    label      = models.CharField(max_length=255, unique=True)
+    link       = models.CharField(max_length=255, blank=True, default='')
+```
+
+## Exhibits page
+
+The `Exhibicion` React component (`frontend/src/components/home/exhibiciones-y-servicios/Exhibicion.jsx`) fetches exhibit records from `GET /api/exhibits/` on mount and renders them through the `MarineExhibit` sub-component. A `WorldSpeciesMap` and a `VisitInfoSection` are also rendered on the same page.
+
+```javascript
+// Exhibicion.jsx — simplified
+useEffect(() => {
+  const fetchExhibits = async () => {
+    const exhibits = await getExhibits();
+    setExhibits(exhibits);
+  };
+  fetchExhibits();
+}, []);
+```
+
+The page description shown to visitors:
+
+> "El Parque Marino Central del Pacifico Sur cuenta con diversas exhibiciones que le permitirán conocer las riquezas de la biodiversidad marina de Costa Rica. Desde la fauna marina, pasando por tortugas marinas, tiburones y rayarios, nuestras exhibiciones te ofrecen una experiencia educativa y entretenida."
+
+## Educational services page
+
+The `Servicios_Educativos` component (`frontend/src/components/home/exhibiciones-y-servicios/Servicios_Educativos.jsx`) combines two data sources:
+
+- **Educational programmes** — loaded from `getServiciosEducativos()` and rendered via `MarineExhibit`.
+- **Live ticket prices** — loaded from `getTickets()` and displayed in a pricing card.
+
+Park operating hours displayed on this page:
+
+| Day | Hours |
+|-----|-------|
+| Tuesday – Sunday | 9:00 am – 4:30 pm |
+| Monday | Closed |
+
+Visitors can navigate directly to the ticketing form from the "Comprar Ahora" button (`/purchase-form/ticketera`).
+
+## Species API
+
+The `Species_ViewSet` exposes full CRUD via the standard DRF ModelViewSet. The serialiser includes all fields:
+
+```python
+# backend/api/species/serializers.py
+class Species_Serializer(serializers.ModelSerializer):
+    class Meta:
+        model  = Species
+        fields = '__all__'
+```
+
+Supported HTTP methods: `GET`, `POST`, `PUT`, `DELETE`.
+
+<Note>
+Role-based permission (`IsAuthenticatedAndRole`) is defined in the viewset but is currently commented out, making the species API publicly readable. Write operations should be restricted to admin accounts before deploying to production.
+</Note>
+
+## Admin CRUD
+
+Admins manage species, animals, habitats, sections, and exhibits through the admin dashboard. Each entity supports create, edit, and delete operations with Yup validation schemas applied before submission.
+
+| Entity | Admin tab key | Editable fields |
+|--------|---------------|-----------------|
+| Species | `species` | name, scientific_name, description, image |
+| Animals | `animals` | name, age, species, conservation_status, habitat |
+| Habitats | `habitats` | name, nums_animals, description, section |
+| Sections | `sections` | name |
+| Conservation status | `conservation-status` | name (IUCN code) |
+| Exhibits | `exhibits` | value, label, title, images, facts, descriptions, buttons |

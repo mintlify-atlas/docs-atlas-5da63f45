@@ -1,0 +1,252 @@
+---
+title: 'PayPal payments'
+description: 'How PayPal is integrated into the ticketing checkout flow using @paypal/react-paypal-js.'
+keywords: ['paypal', 'payments', 'checkout', 'sinpe', 'visa', 'mastercard']
+---
+
+The ticketing system accepts multiple payment methods. PayPal is handled through the official `@paypal/react-paypal-js` SDK. Card payments (Visa, Mastercard) go through the PayPal-hosted card fields. SINPE Móvil and cash are handled as offline confirmation flows.
+
+## Package versions
+
+From `frontend/package.json`:
+
+```json package.json
+"@paypal/paypal-js": "^8.2.0",
+"@paypal/react-paypal-js": "^8.8.3"
+```
+
+Install with:
+
+```bash
+npm install @paypal/react-paypal-js
+```
+
+---
+
+## Configuration
+
+Set your PayPal client ID in the frontend environment file:
+
+```bash .env
+VITE_PAYPAL_CLIENT_ID=<your-paypal-client-id>
+```
+
+<Warning>
+  Never commit a live client ID to source control. Use a sandbox client ID during development and rotate to the live key in your production environment variables.
+</Warning>
+
+To obtain a client ID:
+
+<Steps>
+  <Step title="Create a PayPal Developer account">
+    Go to [developer.paypal.com](https://developer.paypal.com) and sign in.
+  </Step>
+  <Step title="Create an app">
+    Under **My Apps & Credentials**, create a new app. Choose **Merchant** as the app type.
+  </Step>
+  <Step title="Copy the client ID">
+    Copy the **Client ID** from the sandbox (for development) or live (for production) credentials panel and paste it into `.env`.
+  </Step>
+</Steps>
+
+---
+
+## Payment methods
+
+The ticketing form presents four payment options. The `PAYMENT_METHOD_MAP` in `anonymousPurchaseService.js` maps UI selection IDs to the string values expected by the Django model:
+
+```javascript anonymousPurchaseService.js
+const PAYMENT_METHOD_MAP = {
+  1: "CARD",    // Visa / Mastercard via PayPal hosted fields
+  2: "PAYPAL",  // PayPal account
+  3: "CASH",    // Efectivo (cash at the door)
+  4: "CASH",    // SINPE Móvil (maps to CASH on the backend)
+  5: "CASH"     // Efectivo alternate
+};
+```
+
+The Django backend accepts `"CARD"`, `"PAYPAL"`, or `"CASH"` as the `payment_method` string on the purchase order.
+
+<Note>
+  SINPE Móvil is not a programmatic integration — it maps to `CASH` and relies on staff confirmation after the buyer presents payment proof.
+</Note>
+
+---
+
+## PayPal button component
+
+`PayPalButtons` (`src/components/home/PaypalButtons.jsx`) renders the standard PayPal button set using the global `window.paypal` SDK:
+
+```javascript PaypalButtons.jsx
+import React, { useEffect, useRef } from "react";
+
+function PayPalButtons({ amount, onSuccess }) {
+  const paypalRef = useRef();
+
+  useEffect(() => {
+    let paypalButtons;
+
+    const renderPayPalButtons = () => {
+      if (window.paypal) {
+        paypalButtons = window.paypal.Buttons({
+          createOrder: (data, actions) => {
+            return actions.order.create({
+              purchase_units: [{ amount: { value: amount } }],
+            });
+          },
+          onApprove: (data, actions) => {
+            return actions.order.capture().then((details) => {
+              onSuccess(details);
+            });
+          },
+        });
+
+        paypalButtons.render(paypalRef.current);
+      }
+    };
+
+    renderPayPalButtons();
+
+    // Clean up buttons on unmount to avoid duplicate renders
+    return () => {
+      if (paypalButtons) {
+        paypalButtons.close();
+      }
+    };
+  }, [amount, onSuccess]);
+
+  return <div ref={paypalRef}></div>;
+}
+
+export default PayPalButtons;
+```
+
+---
+
+## PaypalPayment wrapper component
+
+`PaypalPayment` (`src/components/payments/PaypalPayment.jsx`) wraps `PayPalButtons` with a loading state, a success screen, and an accepted-methods display.
+
+**Props:**
+
+| Prop | Type | Description |
+|------|------|-------------|
+| `amount` | `number` | Amount to charge |
+| `currency` | `string` | `"CRC"` or `"USD"` (default `"CRC"`) |
+| `onPaymentSuccess` | `function` | Called with `{ paymentMethod: 'PAYPAL', amount, currency, ...paypalDetails }` |
+
+```javascript PaypalPayment.jsx
+import React, { useState } from 'react';
+import PayPalButton from '../home/PaypalButtons';
+
+const PaypalPayment = ({ amount, currency = 'CRC', onPaymentSuccess }) => {
+  const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState(false);
+
+  const handlePaymentSuccess = (paymentData) => {
+    setSuccess(true);
+    onPaymentSuccess({
+      ...paymentData,
+      paymentMethod: 'PAYPAL',
+      amount,
+      currency
+    });
+  };
+
+  const handlePaymentStart = () => {
+    setLoading(true);
+  };
+
+  if (success) {
+    return (
+      <div className="text-center p-6 bg-green-50 rounded-lg border border-green-200">
+        {/* Success UI */}
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 p-6">
+      {/* Header, accepted cards display */}
+      <PayPalButton
+        amount={amount}
+        currency={currency}
+        onSuccess={handlePaymentSuccess}
+        onStart={handlePaymentStart}
+        disabled={loading}
+      />
+    </div>
+  );
+};
+
+export default PaypalPayment;
+```
+
+Accepted cards displayed in the component UI: **Visa**, **Mastercard**, **American Express**, **PayPal**.
+
+---
+
+## Purchase flow
+
+The five-step `TicketeraForm` integrates `PaypalPayment` as one of three payment sub-components:
+
+```javascript TicketeraForm.jsx
+import CardPayment from '@/components/payments/CardPayment';
+import PaypalPayment from '@/components/payments/PaypalPayment';
+import CashPayment from '@/components/payments/CashPayment';
+```
+
+The selected method is stored as a string in `selectedPayment` state. When the buyer reaches the payment step, the matching component is rendered:
+
+```javascript TicketeraForm.jsx
+{selectedPayment === 'PAYPAL' && (
+  <PaypalPayment
+    amount={calculateTotal()}
+    currency="CRC"
+    onPaymentSuccess={(paymentData) => {
+      // 1. Create the anonymous purchase order
+      // 2. Send invoice email via emailInvoiceService
+      // 3. Advance to confirmation step
+    }}
+  />
+)}
+```
+
+The `createAnonymousPurchase` call sends `payment_method: "PAYPAL"` to `POST /api/purchase_orders/anonymous/`.
+
+---
+
+## Payment method selection in the form
+
+When the payment methods API call fails, the form falls back to these defaults:
+
+```javascript TicketeraForm.jsx
+setPaymentMethods([
+  { id: 1, method: 'VISA',       label: 'Tarjeta Visa' },
+  { id: 2, method: 'MASTERCARD', label: 'Tarjeta Mastercard' },
+  { id: 4, method: 'SINPE',      label: 'SINPE Móvil' },
+  { id: 5, method: 'CASH',       label: 'Efectivo' }
+]);
+```
+
+---
+
+## Anonymous purchase payload
+
+The full request body sent by `createAnonymousPurchase`:
+
+```javascript anonymousPurchaseService.js
+const response = await axiosInstance.post('/api/purchase_orders/anonymous/', {
+  email: purchaseData.email,           // required — buyer identifier
+  tickets: purchaseData.tickets,       // [{ ticket_id, quantity }]
+  visit_id: purchaseData.visit_id,     // integer visit ID
+  payment_method: paymentMethod        // "CARD" | "PAYPAL" | "CASH"
+});
+```
+
+Input validation performed before the request:
+
+- `email` must be present and pass `/^[^\s@]+@[^\s@]+\.[^\s@]+$/`
+- `tickets` array must be non-empty
+- `visit_id` must be set
+- `payment_method` must resolve to `"CARD"`, `"PAYPAL"`, or `"CASH"`

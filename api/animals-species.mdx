@@ -1,0 +1,503 @@
+---
+title: 'Animals & species'
+description: 'Manage individual animals and the taxonomic species they belong to.'
+keywords: ['animals', 'species', 'marine life', 'aquarium']
+---
+
+The **Animals** and **Species** resources let you catalog the marine creatures housed at Parque Marino del Pacífico Sur. Each animal belongs to exactly one species, one habitat, and carries a conservation status.
+
+<Note>
+  Write operations (POST, PUT, DELETE) require an authenticated admin session. GET endpoints are publicly accessible.
+</Note>
+
+---
+
+## Animals
+
+### List animals
+
+<ParamField query="search" type="string">
+  Filter by animal name (case-insensitive partial match).
+</ParamField>
+
+<ParamField query="species" type="integer">
+  Filter by species ID.
+</ParamField>
+
+<ParamField query="habitat" type="integer">
+  Filter by habitat ID.
+</ParamField>
+
+<ParamField query="conservation_status" type="integer">
+  Filter by conservation status ID.
+</ParamField>
+
+<RequestExample>
+
+```bash GET /api/animals/
+curl --request GET \
+  --url https://api.parquemarino.org/api/animals/
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json 200
+[
+  {
+    "id": 1,
+    "name": "Tortuga Verde",
+    "age": 12,
+    "species": 3,
+    "conservation_status": 2,
+    "habitat": 1
+  },
+  {
+    "id": 2,
+    "name": "Tiburón Ballena",
+    "age": 7,
+    "species": 5,
+    "conservation_status": 3,
+    "habitat": 2
+  }
+]
+```
+
+</ResponseExample>
+
+#### Response fields
+
+<ResponseField name="id" type="integer" required>
+  Unique identifier for the animal.
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  Common name of the animal. Maximum 30 characters. Animals are ordered alphabetically by name.
+</ResponseField>
+
+<ResponseField name="age" type="integer" required>
+  Age of the animal in years. Must be a positive integer.
+</ResponseField>
+
+<ResponseField name="species" type="integer" required>
+  Foreign key referencing the [`Species`](#species) resource. Deleting a species cascades to its animals.
+</ResponseField>
+
+<ResponseField name="conservation_status" type="integer" required>
+  Foreign key referencing the [`ConservationStatus`](/api/conservation-status) resource.
+</ResponseField>
+
+<ResponseField name="habitat" type="integer" required>
+  Foreign key referencing the [`Habitats`](/api/habitats) resource.
+</ResponseField>
+
+---
+
+### Create animal
+
+<Note>Requires admin authentication.</Note>
+
+<ParamField body="name" type="string" required>
+  Common name of the animal. Maximum 30 characters.
+</ParamField>
+
+<ParamField body="age" type="integer" required>
+  Age in years. Must be greater than or equal to zero.
+</ParamField>
+
+<ParamField body="species" type="integer" required>
+  ID of an existing species record.
+</ParamField>
+
+<ParamField body="conservation_status" type="integer" required>
+  ID of an existing conservation status record.
+</ParamField>
+
+<ParamField body="habitat" type="integer" required>
+  ID of an existing habitat record.
+</ParamField>
+
+<RequestExample>
+
+```bash POST /api/animals/create/
+curl --request POST \
+  --url https://api.parquemarino.org/api/animals/create/ \
+  --header 'Authorization: Bearer <token>' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "name": "Delfín Nariz de Botella",
+    "age": 5,
+    "species": 2,
+    "conservation_status": 1,
+    "habitat": 3
+  }'
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json 201
+{
+  "id": 7,
+  "name": "Delfín Nariz de Botella",
+  "age": 5,
+  "species": 2,
+  "conservation_status": 1,
+  "habitat": 3
+}
+```
+
+</ResponseExample>
+
+---
+
+### Retrieve animal
+
+<ParamField path="id" type="integer" required>
+  Primary key of the animal.
+</ParamField>
+
+<RequestExample>
+
+```bash GET /api/animals/{id}/
+curl --request GET \
+  --url https://api.parquemarino.org/api/animals/1/
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json 200
+{
+  "id": 1,
+  "name": "Tortuga Verde",
+  "age": 12,
+  "species": 3,
+  "conservation_status": 2,
+  "habitat": 1
+}
+```
+
+</ResponseExample>
+
+---
+
+### Update animal
+
+<Note>Requires admin authentication. Use PUT to replace all fields; PATCH is not exposed by the router.</Note>
+
+<ParamField path="id" type="integer" required>
+  Primary key of the animal to update.
+</ParamField>
+
+<ParamField body="name" type="string" required>
+  Updated common name. Maximum 30 characters.
+</ParamField>
+
+<ParamField body="age" type="integer" required>
+  Updated age in years.
+</ParamField>
+
+<ParamField body="species" type="integer" required>
+  Updated species ID.
+</ParamField>
+
+<ParamField body="conservation_status" type="integer" required>
+  Updated conservation status ID.
+</ParamField>
+
+<ParamField body="habitat" type="integer" required>
+  Updated habitat ID.
+</ParamField>
+
+<RequestExample>
+
+```bash PUT /api/animals/{id}/update/
+curl --request PUT \
+  --url https://api.parquemarino.org/api/animals/1/update/ \
+  --header 'Authorization: Bearer <token>' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "name": "Tortuga Verde",
+    "age": 13,
+    "species": 3,
+    "conservation_status": 2,
+    "habitat": 1
+  }'
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json 200
+{
+  "id": 1,
+  "name": "Tortuga Verde",
+  "age": 13,
+  "species": 3,
+  "conservation_status": 2,
+  "habitat": 1
+}
+```
+
+</ResponseExample>
+
+---
+
+### Delete animal
+
+<Note>Requires admin authentication.</Note>
+
+<ParamField path="id" type="integer" required>
+  Primary key of the animal to delete.
+</ParamField>
+
+<RequestExample>
+
+```bash DELETE /api/animals/{id}/delete/
+curl --request DELETE \
+  --url https://api.parquemarino.org/api/animals/1/delete/ \
+  --header 'Authorization: Bearer <token>'
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json 204
+{}
+```
+
+</ResponseExample>
+
+---
+
+## Species
+
+A species is a taxonomic classification that groups animals of the same kind. Each species record can include a scientific name, descriptive text, and a representative image.
+
+### List species
+
+<RequestExample>
+
+```bash GET /api/species/
+curl --request GET \
+  --url https://api.parquemarino.org/api/species/
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json 200
+[
+  {
+    "id": 1,
+    "name": "Chelonia mydas",
+    "description": "Sea turtle species found throughout tropical and subtropical oceans.",
+    "img": "/media/species/chelonia-mydas.jpg",
+    "scientific_name": "Chelonia mydas"
+  },
+  {
+    "id": 2,
+    "name": "Delfín",
+    "description": null,
+    "img": null,
+    "scientific_name": "Tursiops truncatus"
+  }
+]
+```
+
+</ResponseExample>
+
+#### Response fields
+
+<ResponseField name="id" type="integer" required>
+  Unique identifier for the species.
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  Common name of the species. Maximum 30 characters. Must be unique across all species records. Ordered alphabetically.
+</ResponseField>
+
+<ResponseField name="description" type="string">
+  Free-text description of the species. Optional.
+</ResponseField>
+
+<ResponseField name="img" type="string">
+  Relative URL to the uploaded image. Files are stored under `media/species/`. Returns `null` when no image has been uploaded.
+</ResponseField>
+
+<ResponseField name="scientific_name" type="string">
+  Binomial scientific name, up to 100 characters. Optional.
+</ResponseField>
+
+---
+
+### Create species
+
+<Note>Requires admin authentication.</Note>
+
+<ParamField body="name" type="string" required>
+  Common name of the species. Maximum 30 characters. Must be unique.
+</ParamField>
+
+<ParamField body="description" type="string">
+  Free-text description. Optional.
+</ParamField>
+
+<ParamField body="img" type="file">
+  Image file to upload. Stored under `media/species/`. Optional.
+</ParamField>
+
+<ParamField body="scientific_name" type="string">
+  Binomial scientific name. Maximum 100 characters. Optional.
+</ParamField>
+
+<RequestExample>
+
+```bash POST /api/species/create/
+curl --request POST \
+  --url https://api.parquemarino.org/api/species/create/ \
+  --header 'Authorization: Bearer <token>' \
+  --form 'name=Tiburón Martillo' \
+  --form 'scientific_name=Sphyrna lewini' \
+  --form 'description=Hammerhead shark native to tropical coastlines.' \
+  --form 'img=@hammerhead.jpg'
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json 201
+{
+  "id": 6,
+  "name": "Tiburón Martillo",
+  "description": "Hammerhead shark native to tropical coastlines.",
+  "img": "/media/species/hammerhead.jpg",
+  "scientific_name": "Sphyrna lewini"
+}
+```
+
+</ResponseExample>
+
+---
+
+### Retrieve species
+
+<ParamField path="id" type="integer" required>
+  Primary key of the species.
+</ParamField>
+
+<RequestExample>
+
+```bash GET /api/species/{id}/
+curl --request GET \
+  --url https://api.parquemarino.org/api/species/1/
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json 200
+{
+  "id": 1,
+  "name": "Chelonia mydas",
+  "description": "Sea turtle species found throughout tropical and subtropical oceans.",
+  "img": "/media/species/chelonia-mydas.jpg",
+  "scientific_name": "Chelonia mydas"
+}
+```
+
+</ResponseExample>
+
+---
+
+### Update species
+
+<Note>Requires admin authentication. The `<int:pk>/update/` route also exposes DELETE — see [Delete species](#delete-species).</Note>
+
+<ParamField path="id" type="integer" required>
+  Primary key of the species to update.
+</ParamField>
+
+<ParamField body="name" type="string" required>
+  Updated common name. Maximum 30 characters.
+</ParamField>
+
+<ParamField body="description" type="string">
+  Updated description. Optional.
+</ParamField>
+
+<ParamField body="img" type="file">
+  Replacement image. Optional.
+</ParamField>
+
+<ParamField body="scientific_name" type="string">
+  Updated scientific name. Optional.
+</ParamField>
+
+<RequestExample>
+
+```bash PUT /api/species/{id}/update/
+curl --request PUT \
+  --url https://api.parquemarino.org/api/species/6/update/ \
+  --header 'Authorization: Bearer <token>' \
+  --form 'name=Tiburón Martillo' \
+  --form 'scientific_name=Sphyrna lewini' \
+  --form 'description=Updated description.'
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json 200
+{
+  "id": 6,
+  "name": "Tiburón Martillo",
+  "description": "Updated description.",
+  "img": "/media/species/hammerhead.jpg",
+  "scientific_name": "Sphyrna lewini"
+}
+```
+
+</ResponseExample>
+
+---
+
+### Delete species
+
+<Warning>
+  Deleting a species cascades to all animals that reference it. This action cannot be undone.
+</Warning>
+
+<Note>Requires admin authentication.</Note>
+
+<ParamField path="id" type="integer" required>
+  Primary key of the species to delete.
+</ParamField>
+
+<RequestExample>
+
+```bash DELETE /api/species/{id}/delete/
+curl --request DELETE \
+  --url https://api.parquemarino.org/api/species/6/delete/ \
+  --header 'Authorization: Bearer <token>'
+```
+
+</RequestExample>
+
+<ResponseExample>
+
+```json 204
+{}
+```
+
+</ResponseExample>

@@ -1,0 +1,270 @@
+---
+title: Architecture
+description: System architecture of the Parque Marino del Pacífico Sur platform — frontend SPA, Django REST API, authentication flow, backend modules, and infrastructure.
+---
+
+The platform follows a decoupled, three-tier architecture: a React single-page application communicates with a Django REST Framework API over HTTP, and the API persists data to a relational database while delegating media storage to Supabase.
+
+```text Architecture overview
+┌─────────────────────────────────────────────────────────────┐
+│                        Browser (SPA)                        │
+│              React 19 + Vite + Tailwind CSS 4               │
+│   PublicLayout │ ClientLayout │ AdminLayout                  │
+└───────────────────────────┬─────────────────────────────────┘
+                            │ HTTP/JSON (Axios)
+                            │ Authorization: Bearer <JWT>
+┌───────────────────────────▼─────────────────────────────────┐
+│                  Django REST Framework                       │
+│               /api/*  (16 resource modules)                  │
+│      djangorestframework-simplejwt  │  django-cors-headers   │
+└──────────┬──────────────────────────────────────┬───────────┘
+           │                                      │
+  ┌────────▼────────┐                   ┌─────────▼──────────┐
+  │  SQLite (dev)   │                   │  Supabase Storage  │
+  │  MySQL (prod)   │                   │  (media assets)    │
+  └─────────────────┘                   └────────────────────┘
+```
+
+## Frontend
+
+The frontend is a React 19 single-page application built with Vite 6. All routing is client-side, using React Router v7. Components are loaded lazily with `React.lazy` and `Suspense` to minimize initial bundle size.
+
+The application is organized into three layout regions, each with its own layout component and route guard:
+
+### Route structure
+
+<Tabs>
+  <Tab title="Public routes">
+  Public routes are rendered inside `PublicLayout` and require no authentication. They are accessible to all visitors.
+
+  | Path | Page |
+  |---|---|
+  | `/` | Home |
+  | `/login` | Login |
+  | `/register` | Register |
+  | `/forgot-password` | Forgot password |
+  | `/quienes-somos/informacion-institucional` | Institutional information |
+  | `/quienes-somos/historia` | Park history |
+  | `/quienes-somos/equipo` | Team |
+  | `/quienes-somos/transparencia-institucional` | Institutional transparency |
+  | `/exhibiciones-y-servicios/exhibiciones` | Exhibits |
+  | `/exhibiciones-y-servicios/servicios-educativos` | Educational services |
+  | `/exhibiciones-y-servicios/visitas-guiadas` | Guided visits |
+  | `/investigacion-y-conservacion/acuicultura-y-biotecnologia-marina` | Aquaculture & marine biotechnology |
+  | `/investigacion-y-conservacion/centro-de-rescate-y-rehabilitacion` | Rescue & rehabilitation center |
+  | `/investigacion-y-conservacion/investigacion` | Research |
+  | `/investigacion-y-conservacion/proyectos` | Projects |
+  | `/apoyo/voluntariado` | Volunteering |
+  | `/apoyo/donaciones` | Donations |
+  | `/purchase-form/ticketera` | Ticket purchase |
+  | `/terminos-y-condiciones/terminos` | Terms and conditions |
+  | `/privacidad/politica-de-privicidad` | Privacy policy |
+  </Tab>
+  <Tab title="Client routes">
+  Client routes are wrapped in `PrivateRoute`, which redirects unauthenticated users to `/login`. They render inside `ClientLayout`.
+
+  | Path | Page |
+  |---|---|
+  | `/Client_Dashboard` | Client home dashboard |
+  | `/profile` | User profile |
+  </Tab>
+  <Tab title="Admin routes">
+  Admin routes are wrapped in `AdminRoute`, which enforces both authentication and admin role membership. They render inside `AdminLayout`.
+
+  | Path | Page |
+  |---|---|
+  | `/admin/dashboard` | Admin dashboard |
+  | `/admin/logs` | Audit logs |
+  </Tab>
+</Tabs>
+
+<Info>
+All page components are code-split using `React.lazy`. A shared `<Loading />` fallback component is shown during lazy load via `<Suspense>`.
+</Info>
+
+## Backend
+
+The backend is a Django 5.2 application exposing a REST API at `/api/`. Each functional domain is its own Django app under the `api/` package, with its own `models.py`, `serializers.py`, `views.py`, and `urls.py`.
+
+### API modules
+
+<CardGroup cols={2}>
+  <Card title="Animals" icon="paw-print">
+    `/api/animals/` — Individual animal records: name, species, habitat assignment, photos, and section placement within the park.
+  </Card>
+  <Card title="Species" icon="dna">
+    `/api/species/` — Scientific classification of marine species, linked to animals and conservation status records.
+  </Card>
+  <Card title="Habitats" icon="tree">
+    `/api/habitats/` — Habitat definitions (e.g., reef, open ocean, mangrove) assigned to species and animal records.
+  </Card>
+  <Card title="Conservation status" icon="shield">
+    `/api/conservation_status/` — IUCN-style conservation categories (e.g., Endangered, Vulnerable) linked to species.
+  </Card>
+  <Card title="Exhibits" icon="image">
+    `/api/exhibiciones/` — Park exhibit definitions with images, descriptions, and section assignments.
+  </Card>
+  <Card title="Educational services" icon="book">
+    `/api/servicios_educativos/` — Educational service offerings available to the public and registered users.
+  </Card>
+  <Card title="Educational programs" icon="graduation-cap">
+    `/api/programas_educativos/` — Structured programs (workshops, tours) with scheduling and registration.
+  </Card>
+  <Card title="Tickets" icon="ticket">
+    `/api/tickets/` — Ticket types and pricing configuration for park entry.
+  </Card>
+  <Card title="Visits" icon="calendar">
+    `/api/visits/` — Individual visit records linked to purchase orders, including date, visitor count, and QR codes.
+  </Card>
+  <Card title="Purchase orders" icon="receipt">
+    `/api/purchase_orders/` — Purchase order records tracking buyer information, total, and payment status.
+  </Card>
+  <Card title="Ticket purchases" icon="shopping-cart">
+    `/api/tickets_purchase_orders/` — Junction table linking individual ticket line items to their parent purchase orders.
+  </Card>
+  <Card title="Payments" icon="credit-card">
+    `/api/payments/` — Payment records linked to purchase orders, capturing PayPal transaction IDs and amounts.
+  </Card>
+  <Card title="Sections" icon="map">
+    `/api/sections/` — Physical sections of the park, used to organize exhibits and animal placements.
+  </Card>
+  <Card title="Provinces" icon="globe">
+    `/api/provinces/` — Costa Rican province data used in visitor registration and reporting.
+  </Card>
+  <Card title="Documents" icon="file">
+    `/api/documents/` — Institutional documents (reports, transparency files) accessible through the public portal.
+  </Card>
+  <Card title="Audit log" icon="scroll">
+    `/api/audit_log/` — Admin-only log of all significant API actions for compliance and debugging.
+  </Card>
+</CardGroup>
+
+### Module structure
+
+Every backend module follows a consistent file layout:
+
+```text Module layout
+api/
+└── <module_name>/
+    ├── __init__.py
+    ├── models.py       # Database model definitions
+    ├── serializers.py  # DRF serializers (model → JSON)
+    ├── views.py        # ViewSets and API logic
+    └── urls.py         # URL patterns for this module
+```
+
+## Authentication
+
+The platform uses **JWT (JSON Web Tokens)** via `djangorestframework-simplejwt`. Token lifetimes are:
+
+- **Access token**: 5 minutes
+- **Refresh token**: 1 day, with automatic rotation enabled
+
+<Steps>
+  <Step title="Client sends credentials">
+    The frontend posts `email` and `password` to `/api/auth/login/`.
+
+    ```bash
+    POST /api/auth/login/
+    Content-Type: application/json
+
+    {
+      "email": "user@example.com",
+      "password": "password"
+    }
+    ```
+  </Step>
+  <Step title="Server returns token pair">
+    On success, the API returns an `access` token and a `refresh` token.
+
+    ```json
+    {
+      "access": "<short-lived JWT>",
+      "refresh": "<long-lived JWT>"
+    }
+    ```
+  </Step>
+  <Step title="Frontend stores tokens">
+    The React app stores tokens in cookies via `js-cookie` and attaches the `access` token to every subsequent Axios request as an `Authorization: Bearer` header.
+  </Step>
+  <Step title="Token refresh">
+    When the access token expires, the frontend posts the refresh token to `/api/auth/token/refresh/` to obtain a new access token without re-authentication.
+  </Step>
+  <Step title="Route guards enforce roles">
+    `PrivateRoute` checks for a valid token before rendering client pages. `AdminRoute` additionally verifies the user's role claim before rendering admin pages.
+  </Step>
+</Steps>
+
+### Role-based access
+
+| Role | Access |
+|---|---|
+| **Public** | All public routes, anonymous ticket purchase, donations, volunteering |
+| **Client** | All public routes + `/Client_Dashboard` + `/profile` |
+| **Admin** | All routes + `/admin/dashboard`, audit logs, full CRUD on all resources |
+
+## Database
+
+The backend supports two database engines controlled by environment variables:
+
+<Tabs>
+  <Tab title="SQLite (development)">
+  SQLite is the default configuration for local development. No external service is required.
+
+  ```env
+  DATABASE_ENGINE=django.db.backends.sqlite3
+  DATABASE_NAME=parque_marino_db.sqlite3
+  ```
+  </Tab>
+  <Tab title="MySQL (production)">
+  MySQL is the recommended engine for production deployments.
+
+  ```env
+  DATABASE_ENGINE=django.db.backends.mysql
+  DATABASE_NAME=parque_marino_db
+  DATABASE_USER=your_user
+  DATABASE_PASSWORD=your_password
+  DATABASE_HOST=localhost
+  DATABASE_PORT=3306
+  ```
+  </Tab>
+</Tabs>
+
+<Warning>
+Never commit the `.env` file to source control. The `DATABASE_PASSWORD` and `DJANGO_SECRET_KEY` values must be kept secret in all environments.
+</Warning>
+
+## Media storage
+
+User-uploaded and system-generated files are stored in **Supabase Storage**, replacing Django's default local `media/` directory in production. Supabase provides a global CDN, Row Level Security policies, and an S3-compatible REST API.
+
+The following buckets are used:
+
+| Bucket path | Contents |
+|---|---|
+| `media/species/` | Species and animal images |
+| `media/exhibitions/` | Exhibit photos |
+| `media/profile_pics/` | User profile pictures |
+| `media/programas/` | Educational program files |
+| `media/servicios-educativos/` | Educational service files |
+| `media/documentos/` | Institutional documents |
+| `media/qr_codes/` | Generated QR code images |
+
+<Tip>
+During local development, Django falls back to the local `media/` directory. Supabase integration is activated by setting the `SUPABASE_URL` and `SUPABASE_KEY` environment variables.
+</Tip>
+
+## CORS configuration
+
+The backend uses `django-cors-headers` to allow cross-origin requests from the frontend development server. The following origins are allowed by default:
+
+```python
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",   # Vite dev server
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+```
+
+In production, update this list to include only your deployed frontend domain.

@@ -1,0 +1,131 @@
+---
+title: 'Research and conservation'
+description: 'Overview of the research programme, marine aquaculture and biotechnology laboratory, and the rescue and rehabilitation centre at Parque Marino del Pacífico Sur.'
+keywords: ['investigación', 'acuicultura', 'biotecnología', 'rescate', 'rehabilitación', 'conservación marina']
+---
+
+Parque Marino del Pacífico Sur operates three distinct scientific programmes. Each programme is surfaced to the public through its own section of the site and is backed by tabbed content drawn from curated data files in the frontend.
+
+<CardGroup cols={1}>
+  <Card title="Research programme" icon="flask-conical">
+    Applied marine research with active projects, publications, and collaborative networks. Covers ecology, systematics, and marine conservation science.
+  </Card>
+  <Card title="Aquaculture and marine biotechnology" icon="microscope">
+    The LABM laboratory promotes sustainable aquaculture as an alternative to extractive fishing, producing marine organisms and transferring technology to coastal communities.
+  </Card>
+  <Card title="Rescue and rehabilitation centre (CRRAM)" icon="shield-check">
+    A licensed wildlife rescue facility that treats and rehabilitates injured marine animals, coordinating releases and providing permanent care for animals unable to survive in the wild.
+  </Card>
+</CardGroup>
+
+## Research programme
+
+The `Investigacion` component (`frontend/src/components/home/acuicultura-y-biotecnologia/Investigacion.jsx`) renders the research section with four navigable tabs.
+
+Programme description:
+
+> "El Parque Marino del Pacífico en Puntarenas, Costa Rica, no es solo un acuario o un centro de exhibición; es una institución dedicada a la investigación aplicada, la conservación y el desarrollo sostenible de los recursos marinos y costeros."
+
+<Tabs>
+  <Tab title="Research areas">
+    The `InvestigacionTab` component displays lines of research (`lineasDeInvestigacion`) and thematic areas (`areas`) sourced from `data/lineasDeInvestigacion.js`. Content covers marine ecology, species biology, and conservation science relevant to Costa Rica's Pacific coast.
+  </Tab>
+  <Tab title="Current projects">
+    The `ProyectosTab` component renders active research projects from `data/proyectosData.js`. Each project entry includes a title, description, and status.
+  </Tab>
+  <Tab title="Publications">
+    The `PublicacionesTab` component lists scientific publications from `data/publicacionesData.js` alongside summary statistics (`publicacionesStats`) such as total publications and citation counts.
+  </Tab>
+  <Tab title="Collaborations">
+    The `ColaboracionesTab` component shows institutional collaborators (`colaboradores`) and research networks (`redes`) from `data/colaboradoresData.js`.
+  </Tab>
+</Tabs>
+
+A mission call-to-action at the bottom of the page links to:
+
+| Link | Destination |
+|------|-------------|
+| Ser Voluntario | `/apoyo/voluntariado` |
+| Hacer una Donación | `/apoyo/donaciones` |
+| Proponer Colaboración | `/exhibiciones-y-servicios/servicios-educativos` |
+
+## Aquaculture and marine biotechnology (LABM)
+
+The `AcuiculturaBiotecnologia` component (`frontend/src/components/home/acuicultura-y-biotecnologia/AcuiculturaBiotecnologia.jsx`) introduces the Laboratorio de Acuicultura y Biotecnología Marina (LABM) and its six programme areas through a tab container.
+
+Context from the component:
+
+> "La acuicultura es crucial en Costa Rica, donde solo el 2% de los productos marinos consumidos provienen del cultivo, a pesar de que la producción acuícola representa cerca del 50% de la pesca mundial."
+
+LABM areas of work:
+
+- Promoción de la Acuicultura Marina
+- Investigación y Desarrollo (I+D)
+- Producción de Organismos Marinos
+- Cultivo Larval y de Juveniles
+- Extensión y Transferencia Tecnológica
+- Conservación y Educación Ambiental
+- Capacitación y Formación Académica
+- Incidencia en Políticas Públicas
+
+<Tabs>
+  <Tab title="Cultured species">
+    The `CultivoTab` component displays the marine species currently under cultivation in the LABM.
+  </Tab>
+  <Tab title="Technology and innovation">
+    The `TecnologiaTab` component describes the laboratory techniques and innovations applied in the programme.
+  </Tab>
+  <Tab title="Current projects">
+    Shared with the research programme — uses the same `ProyectosTab` component and `proyectosData.js` source.
+  </Tab>
+  <Tab title="Farms">
+    The `GranjasTab` component lists associated aquaculture farms (`GranjasListComponent`, `GranjaDetails`) operating in partnership with the park.
+  </Tab>
+  <Tab title="Collaborations">
+    Institutional collaborators and networks, same data source as the research section.
+  </Tab>
+  <Tab title="Publications">
+    Scientific publications from the LABM programme.
+  </Tab>
+</Tabs>
+
+The section also includes a `SuccessCases` component with documented outcomes and a `CallToAction` component inviting further engagement.
+
+## Rescue and rehabilitation centre (CRRAM)
+
+The `CentroDeRescate` component (`frontend/src/components/home/acuicultura-y-biotecnologia/CentroDeRescate.jsx`) describes the Centro de Rescate y Rehabilitación de Animales Marinos.
+
+Origin and accreditation, from the component:
+
+> "El CRRAM inició gracias a donaciones de Florida Bebidas y Pesquera Cannavo de Venezuela, y al apoyo de Fundación CRUSA. El centro de rescate se encuentra debidamente inscrito ante el SINAC cumpliendo así con la normativa vigente, por lo cual se cuenta con un regente, biólogos de planta y un veterinario."
+
+Centre services:
+
+- Acogen pelícanos, gaviotas, bobos, tortugas marinas, cocodrilos y serpientes marinas heridos o en peligro.
+- Brindan atención médica especializada con veterinarios y biólogos de planta.
+- Coordinan la reintroducción de animales rehabilitados a su hábitat natural cuando es posible.
+- Proporcionan hogar permanente a animales con discapacidades que impiden su liberación.
+- Los animales residentes sirven como embajadores educativos para concientizar a los visitantes.
+- Operan bajo los permisos del SINAC con personal especializado y un regente autorizado.
+
+<Tabs>
+  <Tab title="Species treated">
+    The `EspeciesTab` component lists the species the CRRAM is equipped to receive and treat.
+  </Tab>
+  <Tab title="Publications">
+    The `PublicacionesTab` component uses the CRRAM-specific data source `data/publicacionesCRRAMData.js`, separate from the research programme publications.
+  </Tab>
+  <Tab title="Success stories">
+    The `HistoriasTab` component presents documented rehabilitation and release success cases.
+  </Tab>
+  <Tab title="How to help">
+    The `ComoAyudarTab` component explains how the public can support the rescue centre through donations, volunteering, or reporting injured animals.
+  </Tab>
+  <Tab title="Responsible ownership">
+    The `TenenciaResponsableTab` component provides guidance on responsible marine animal ownership to reduce the number of animals requiring rescue.
+  </Tab>
+</Tabs>
+
+<Note>
+To report a marine animal in distress, use the "Reportar Animal en peligro" button on the CRRAM page. The button currently triggers an alert placeholder; the full reporting form is pending implementation.
+</Note>

@@ -1,0 +1,94 @@
+{
+  "projectType": "saas",
+  "projectName": "Parque Marino del Pacífico Sur",
+  "projectDescription": "A full-stack web platform for Costa Rica's Southern Pacific Marine Park, enabling ticket purchases, visit reservations, donations, volunteering, species exploration, and institutional transparency.",
+  "theme": "palm",
+  "primaryColor": "#40993e",
+  "lightColor": "#183018",
+  "darkColor": "#e4e8e4",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": ["introduction", "architecture"]
+          },
+          {
+            "group": "Getting Started",
+            "pages": ["getting-started/backend-setup", "getting-started/frontend-setup", "getting-started/environment-variables"]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "features/ticketing-and-visits",
+              "features/species-and-exhibits",
+              "features/donations-and-volunteering",
+              "features/research-and-conservation",
+              "features/admin-dashboard"
+            ]
+          },
+          {
+            "group": "Integrations",
+            "pages": ["integrations/qr-and-email", "integrations/paypal-payments", "integrations/supabase-storage"]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Authentication",
+            "pages": ["api/authentication", "api/user-management"]
+          },
+          {
+            "group": "Marine Life",
+            "pages": ["api/animals-species", "api/habitats", "api/conservation-status"]
+          },
+          {
+            "group": "Tickets & Visits",
+            "pages": ["api/tickets", "api/visits", "api/purchase-orders"]
+          },
+          {
+            "group": "Content & Programs",
+            "pages": ["api/exhibits", "api/educational-services", "api/educational-programs", "api/documents"]
+          },
+          {
+            "group": "Admin & Audit",
+            "pages": ["api/payments", "api/audit-log"]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Anonymous ticket purchasing with QR code generation and email invoice delivery",
+    "Marine species interactive database with habitat and conservation status tracking",
+    "Visit reservation system with flexible date selection and PayPal/SINPE payment support",
+    "Donations and volunteering portal for civic engagement",
+    "Educational services and programs module for workshops and resources",
+    "Admin dashboard with audit logs and institutional transparency reports",
+    "JWT-based authentication with role-based access (public, client, admin)",
+    "Supabase storage integration for media assets"
+  ],
+  "publicApiSurface": [
+    "POST /api/purchase-orders/anonymous/",
+    "GET /api/tickets/available/",
+    "GET /api/visits/available/",
+    "GET /api/payments/methods/",
+    "GET /api/animals/",
+    "GET /api/species/",
+    "GET /api/habitats/",
+    "GET /api/conservation_status/",
+    "GET /api/exhibiciones/",
+    "GET /api/servicios_educativos/",
+    "GET /api/programas_educativos/",
+    "GET /api/documents/",
+    "POST /api/auth/login/",
+    "POST /api/auth/register/",
+    "GET /api/purchase-orders/validate-qr/",
+    "POST /api/purchase-orders/validate-bulk-qr/",
+    "GET /api/audit_log/"
+  ]
+}

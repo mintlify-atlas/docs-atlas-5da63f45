@@ -1,0 +1,351 @@
+---
+title: 'Payments'
+description: 'Manage payment records and retrieve available payment methods for the Parque Marino del Pacífico Sur ticketing system.'
+keywords: ['payments', 'payment methods', 'SINPE', 'transactions', 'purchase orders']
+---
+
+The Payments API handles payment records linked to purchase orders and exposes a public endpoint for listing available payment methods. Payment state changes are atomic — a successful payment automatically marks the associated order as paid, while a failed payment cancels the order and releases reserved slots.
+
+## Payment methods
+
+### GET /api/payments/methods/
+
+Returns all accepted payment methods. This endpoint is **public** — no authentication is required.
+
+<ParamField query="(none)" type="">
+  No query parameters are accepted by this endpoint.
+</ParamField>
+
+<ResponseExample>
+
+```json 200
+{
+  "payment_methods": [
+    {
+      "id": 1,
+      "method": "MASTERCARD",
+      "label": "Tarjeta Mastercard",
+      "description": "Pago con tarjeta Mastercard",
+      "is_active": true
+    },
+    {
+      "id": 2,
+      "method": "VISA",
+      "label": "Tarjeta Visa",
+      "description": "Pago con tarjeta Visa",
+      "is_active": true
+    },
+    {
+      "id": 3,
+      "method": "PAYPAL",
+      "label": "PayPal",
+      "description": "Pago a través de PayPal",
+      "is_active": true
+    },
+    {
+      "id": 4,
+      "method": "SINPE",
+      "label": "SINPE Móvil",
+      "description": "Transferencia SINPE Móvil (Costa Rica)",
+      "is_active": true
+    },
+    {
+      "id": 5,
+      "method": "CASH",
+      "label": "Efectivo",
+      "description": "Pago en efectivo en el sitio",
+      "is_active": true
+    }
+  ],
+  "total_methods": 5
+}
+```
+
+</ResponseExample>
+
+**Response fields**
+
+<ResponseField name="payment_methods" type="object[]" required>
+  List of accepted payment methods.
+
+  <Expandable title="properties">
+    <ResponseField name="id" type="number" required>
+      Numeric identifier for the payment method.
+    </ResponseField>
+    <ResponseField name="method" type="string" required>
+      Internal code used when creating a payment. One of `MASTERCARD`, `VISA`, `PAYPAL`, `SINPE`, `CASH`.
+    </ResponseField>
+    <ResponseField name="label" type="string" required>
+      Human-readable display name.
+    </ResponseField>
+    <ResponseField name="description" type="string" required>
+      Short description shown to the end user.
+    </ResponseField>
+    <ResponseField name="is_active" type="boolean" required>
+      Whether the method is currently available for selection.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="total_methods" type="number" required>
+  Total count of payment methods returned.
+</ResponseField>
+
+---
+
+## Payment records
+
+All endpoints below require authentication.
+
+<Note>
+  Authenticated users see only their own payments. Staff and superusers see all payments across all users.
+</Note>
+
+### GET /api/payments/
+
+List payment records visible to the authenticated user.
+
+### POST /api/payments/create/
+
+Create a new payment record and link it to an existing purchase order. The operation runs inside a database transaction — if any step fails, the entire operation rolls back.
+
+**Request body**
+
+<ParamField body="purchase_order" type="number" required>
+  ID of the purchase order to pay. The order must be in `PENDING` or `PAID` status.
+</ParamField>
+
+<ParamField body="payment_method" type="string" required>
+  Payment method code stored in the `Payments` model. One of `CARD`, `PAYPAL`, `SINPE`, `CASH`.
+
+  <Note>
+    The `Payments` model stores the method as `CARD` (not `MASTERCARD` or `VISA`). The specific card network is tracked at the frontend/payment-processor level. Use `GET /api/payments/methods/` to map the user-facing labels (Mastercard, Visa) to their display values.
+  </Note>
+</ParamField>
+
+<ParamField body="transaction_id" type="string">
+  External transaction identifier. Required for `MASTERCARD`, `VISA`, and `PAYPAL`. Optional for `CASH` and `SINPE`. Must be 5–100 alphanumeric characters, hyphens, or underscores.
+</ParamField>
+
+<ParamField body="status" type="string" required>
+  Initial payment status. One of `SUCCESS`, `FAILED`.
+</ParamField>
+
+**Example request**
+
+```bash cURL
+curl --request POST \
+  --url https://api.parquemarino.example.com/api/payments/create/ \
+  --header 'Authorization: Bearer <token>' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "purchase_order": 42,
+    "payment_method": "SINPE",
+    "transaction_id": "SINPE-20260325-001",
+    "status": "SUCCESS"
+  }'
+```
+
+**Response fields (201 Created)**
+
+<ResponseField name="id" type="number" required>
+  Unique payment record ID.
+</ResponseField>
+
+<ResponseField name="purchase_order" type="number" required>
+  ID of the linked purchase order.
+</ResponseField>
+
+<ResponseField name="payment_date" type="string" required>
+  ISO 8601 datetime when the payment was recorded. Set automatically on creation.
+</ResponseField>
+
+<ResponseField name="payment_method" type="string" required>
+  Payment method used. One of `CARD`, `PAYPAL`, `SINPE`, `CASH` (as stored in the `Payments` model).
+</ResponseField>
+
+<ResponseField name="transaction_id" type="string" required>
+  External transaction identifier.
+</ResponseField>
+
+<ResponseField name="status" type="string" required>
+  Payment result. `SUCCESS` or `FAILED`.
+</ResponseField>
+
+<ResponseField name="order_total" type="number" required>
+  Total amount of the linked purchase order (read-only, computed field).
+</ResponseField>
+
+<ResponseField name="order_status" type="string" required>
+  Current status of the linked purchase order after the payment was applied (read-only, computed field).
+</ResponseField>
+
+<ResponseField name="days_since_payment" type="number" required>
+  Number of days elapsed since `payment_date` (read-only, computed field).
+</ResponseField>
+
+<ResponseExample>
+
+```json 201
+{
+  "id": 7,
+  "purchase_order": 42,
+  "payment_date": "2026-03-25T14:30:00Z",
+  "payment_method": "SINPE",
+  "transaction_id": "SINPE-20260325-001",
+  "status": "SUCCESS",
+  "order_total": 15000.00,
+  "order_status": "PAID",
+  "days_since_payment": 0
+}
+```
+
+</ResponseExample>
+
+### GET /api/payments/{id}/
+
+Retrieve a single payment record by ID.
+
+<ParamField path="id" type="number" required>
+  Payment record ID.
+</ParamField>
+
+### PUT /api/payments/{id}/update/
+
+Update a payment record. Accepts the same body fields as `POST /api/payments/create/`. The update also runs inside a database transaction.
+
+### DELETE /api/payments/{id}/delete/
+
+Delete a payment record.
+
+---
+
+## Status transitions and side effects
+
+When a payment record is saved, the model automatically triggers state changes on the linked purchase order:
+
+| Payment status | Purchase order effect |
+|---|---|
+| `SUCCESS` | Order is marked as paid (`mark_as_paid`) |
+| `FAILED` | Order is cancelled and reserved visit slots are released (`mark_as_cancelled`) |
+
+These transitions are enforced at the model level and cannot be bypassed through the API.
+
+---
+
+## Audit trail
+
+All payment creation and status changes are captured by Django signals in `purchase_orders/audit.py`. Events are written to `logs/payments.log` with the following fields: `timestamp`, `event_type`, `model`, `instance_id`, `user_id`, `user_email`, `changes`, and `extra_data`. Critical events (`PAYMENT_SUCCESS`, `PAYMENT_FAILED`) emit dedicated log entries in addition to the generic `UPDATE` entry.
+
+---
+
+## Donations
+
+The donations system allows supporters to contribute to the park. Managed through the same `payments` app.
+
+<Note>
+  The `Donation` model does not require a linked `PurchaseOrders` record — it is independent. Authenticated users can submit and view their own donations.
+</Note>
+
+### Donation model
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | integer | Auto-generated primary key |
+| `amount` | decimal(10,2) | Donation amount |
+| `currency` | string | `CRC` (colones) or `USD` (dollars) |
+| `donor_name` | string (max 100) | Optional donor name |
+| `donor_email` | email | Optional donor email |
+| `payment_method` | string | `CARD`, `PAYPAL`, or `CASH` (includes SINPE) |
+| `transaction_id` | string (max 100) | Optional external transaction reference |
+| `status` | string | `SUCCESS`, `FAILED`, or `PENDING` (default) |
+| `created_at` | datetime | Auto-set on creation |
+
+### GET /api/payments/donations/
+
+List donation records. Admins see all donations; regular users see only their own.
+
+<Note>Requires authentication.</Note>
+
+```bash
+curl https://api.parquemarino.cr/api/payments/donations/ \
+  -H "Authorization: Bearer <token>"
+```
+
+### POST /api/payments/donations/create/
+
+Create a new donation record.
+
+<Note>Requires authentication.</Note>
+
+**Request body**
+
+<ParamField body="amount" type="decimal" required>
+  Donation amount. Must be a positive decimal (e.g., `5000.00`).
+</ParamField>
+
+<ParamField body="currency" type="string" required>
+  Currency code: `CRC` or `USD`.
+</ParamField>
+
+<ParamField body="donor_name" type="string">
+  Optional name of the donor (max 100 characters).
+</ParamField>
+
+<ParamField body="donor_email" type="string">
+  Optional email address for the donor.
+</ParamField>
+
+<ParamField body="payment_method" type="string" required>
+  Payment method: `CARD`, `PAYPAL`, or `CASH` (includes SINPE).
+</ParamField>
+
+<ParamField body="transaction_id" type="string">
+  Optional external transaction reference from the payment processor.
+</ParamField>
+
+<ParamField body="status" type="string">
+  Initial status: `SUCCESS`, `FAILED`, or `PENDING`. Defaults to `PENDING`.
+</ParamField>
+
+```bash
+curl -X POST https://api.parquemarino.cr/api/payments/donations/create/ \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "amount": "10000.00",
+    "currency": "CRC",
+    "donor_name": "María García",
+    "donor_email": "maria@ejemplo.com",
+    "payment_method": "CARD",
+    "status": "SUCCESS"
+  }'
+```
+
+**201 response**
+
+```json
+{
+  "id": 5,
+  "amount": "10000.00",
+  "currency": "CRC",
+  "donor_name": "María García",
+  "donor_email": "maria@ejemplo.com",
+  "payment_method": "CARD",
+  "transaction_id": null,
+  "status": "SUCCESS",
+  "created_at": "2026-03-25T10:00:00Z"
+}
+```
+
+### GET /api/payments/donations/{id}/
+
+Retrieve a single donation record by ID. Requires authentication.
+
+### PUT /api/payments/donations/{id}/update/
+
+Update a donation record. Requires authentication.
+
+### DELETE /api/payments/donations/{id}/delete/
+
+Delete a donation record. Requires authentication.

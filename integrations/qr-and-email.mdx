@@ -1,0 +1,411 @@
+---
+title: 'QR codes and email'
+description: 'How the platform auto-generates QR codes on purchase and sends invoice emails via EmailJS.'
+keywords: ['qr', 'email', 'emailjs', 'invoice', 'signals', 'django']
+---
+
+Every purchase order triggers two automatic actions: a QR code is generated on the backend and an invoice email is sent from the frontend. Neither action requires manual intervention.
+
+## How it works
+
+<Steps>
+  <Step title="Purchase created">
+    The buyer submits the ticketing form. `createAnonymousPurchase` posts to `POST /api/purchase_orders/anonymous/` and returns a purchase order object.
+  </Step>
+  <Step title="QR generated automatically">
+    A Django `post_save` signal fires immediately after the `PurchaseOrders` row is created. It calls `generate_qr_code(instance)`, which writes a `.png` file to `media/qr_codes/` and stores the relative path back on the order.
+  </Step>
+  <Step title="Invoice email sent">
+    Back in the browser, `sendInvoiceEmail` from `emailInvoiceService.js` sends the complete invoice — including a reference to the QR URL — through the EmailJS API.
+  </Step>
+</Steps>
+
+---
+
+## Backend: QR generation
+
+### The signal
+
+The signal is defined in `api/purchase_orders/signals.py` and registered when the `PurchaseOrdersConfig` app is ready.
+
+```python signals.py
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from .models import PurchaseOrders
+from api.utils import generate_qr_code
+
+@receiver(post_save, sender=PurchaseOrders)
+def create_qr_on_order(sender, instance, created, **kwargs):
+    if created and not instance.qr_image:
+        generate_qr_code(instance)
+```
+
+The guard `not instance.qr_image` prevents regeneration on subsequent saves (e.g. `update_fields`).
+
+### Registering the signal
+
+```python api/purchase_orders/apps.py
+class PurchaseOrdersConfig(AppConfig):
+    name = 'api.purchase_orders'
+
+    def ready(self):
+        import api.purchase_orders.signals  # registers the signal
+```
+
+```python config/settings.py
+INSTALLED_APPS = [
+    # ...
+    "api.purchase_orders.apps.PurchaseOrdersConfig",
+]
+```
+
+### `generate_qr_code`
+
+Defined in `api/utils.py`:
+
+```python api/utils.py
+import qrcode
+import os
+import json
+import hashlib
+from datetime import datetime
+from django.conf import settings
+
+def generate_qr_code(purchase_order):
+    """
+    Generates a QR code image for a purchase order.
+    Stores the result at media/qr_codes/<filename>.png
+    and writes the relative path to purchase_order.qr_image.
+    """
+    try:
+        total_tickets = purchase_order.get_total_tickets()
+
+        qr_data = {
+            "order_id": purchase_order.id,
+            "email": purchase_order.email,
+            "purchase_date": purchase_order.purchase_date.isoformat(),
+            "visit_date": purchase_order.visit.day.isoformat(),
+            "total_tickets": total_tickets,
+            "total_crc": float(purchase_order.total_crc),
+            "total_usd": float(purchase_order.total_usd),
+            "status": purchase_order.status,
+            "visit_id": purchase_order.visit.id
+        }
+
+        # 8-character MD5 verification token
+        data_string = (
+            f"{purchase_order.id}-{purchase_order.email}"
+            f"-{purchase_order.purchase_date}-{total_tickets}"
+        )
+        verification_hash = hashlib.md5(data_string.encode()).hexdigest()[:8]
+        qr_data["verification"] = verification_hash
+
+        qr_json = json.dumps(qr_data, ensure_ascii=False)
+
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_M,
+            box_size=10,
+            border=4,
+        )
+        qr.add_data(qr_json)
+        qr.make(fit=True)
+
+        # Cyan fill matches the site theme
+        img = qr.make_image(fill_color="#0891b2", back_color="white")
+
+        qr_dir = os.path.join(settings.MEDIA_ROOT, 'qr_codes')
+        os.makedirs(qr_dir, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_name = f"qr_order_{purchase_order.id}_{timestamp}.png"
+        file_path = os.path.join(qr_dir, file_name)
+        img.save(file_path)
+
+        relative_path = f"qr_codes/{file_name}"
+        purchase_order.qr_image = relative_path
+        purchase_order.save(update_fields=['qr_image'])
+
+        return relative_path
+
+    except Exception as e:
+        print(f"Error generating QR for order {purchase_order.id}: {e}")
+        return None
+```
+
+### QR data structure
+
+The JSON embedded in each QR code:
+
+```json
+{
+  "order_id": 123,
+  "email": "visitor@example.com",
+  "purchase_date": "2024-01-10T14:30:00+00:00",
+  "visit_date": "2024-01-15",
+  "total_tickets": 2,
+  "total_crc": 25000.00,
+  "total_usd": 0.00,
+  "status": "PAID",
+  "visit_id": 7,
+  "verification": "a3f2c1d9"
+}
+```
+
+The `verification` field is an 8-character MD5 digest of `"<id>-<email>-<purchase_date>-<total_tickets>"`. Staff can recompute this server-side with `verify_qr_data` to confirm a QR has not been tampered with.
+
+<Note>
+  `verify_qr_data` (also in `api/utils.py`) checks `order_id`, `email`, and recomputes the verification hash. It returns `True` only when all three match.
+</Note>
+
+---
+
+## Backend: QR validation endpoints
+
+Defined in `api/purchase_orders/urls.py`:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/purchase_orders/validate_qr/` | Validate a single QR payload |
+| `POST` | `/api/purchase_orders/validate-bulk-qr/` | Validate multiple QR payloads |
+| `GET` | `/api/purchase_orders/demo-qr/` | Demo endpoint for QR testing |
+
+<CodeGroup>
+
+```bash Single validation
+GET /api/purchase_orders/validate_qr/?qr_data=<url-encoded-json>
+```
+
+```bash Bulk validation
+POST /api/purchase_orders/validate-bulk-qr/
+Content-Type: application/json
+
+{
+  "qr_codes": [
+    "{\"order_id\": 1, ...}",
+    "{\"order_id\": 2, ...}"
+  ]
+}
+```
+
+</CodeGroup>
+
+Successful validation response:
+
+```json
+{
+  "valid": true,
+  "access_granted": true,
+  "status": "PAID",
+  "order_info": {
+    "confirmation_code": "ANON-ABC12345",
+    "customer_email": "visitor@example.com",
+    "visit_date": "2024-01-15",
+    "total_price": "\u20a125,000.00"
+  },
+  "message": "Acceso autorizado"
+}
+```
+
+---
+
+## Frontend: email invoice service
+
+The service lives at `src/services/emailInvoiceService.js` and uses `@emailjs/browser ^4.4.1`.
+
+### Configuration
+
+```javascript emailInvoiceService.js
+const EMAILJS_CONFIG = {
+  serviceId: 'service_ke9gzcs',
+  templateId: 'template_factura',          // primary invoice template
+  fallbackTemplateId: 'template_cho3xqg',  // fallback if primary is missing
+  publicKey: '3mQx8AVIUbbufg0BX'
+};
+```
+
+<Warning>
+  The credentials above are the defaults committed to the repository. For production, rotate these values and store them in environment variables.
+</Warning>
+
+Environment variables (Vite):
+
+```bash .env
+VITE_EMAILJS_SERVICE_ID=service_ke9gzcs
+VITE_EMAILJS_TEMPLATE_ID=template_factura
+VITE_EMAILJS_PUBLIC_KEY=3mQx8AVIUbbufg0BX
+```
+
+### Exported functions
+
+```javascript emailInvoiceService.js
+/**
+ * Send a full invoice email with QR reference.
+ * @param {Object} invoiceData
+ * @param {string} invoiceData.email           - Buyer's email address
+ * @param {Object} invoiceData.purchaseOrder   - Order data from the API
+ * @param {string} invoiceData.qrImageUrl      - Public URL of the generated QR image
+ * @param {Array}  invoiceData.tickets         - Array of ticket line items
+ * @returns {Promise<{ success: boolean, sentTo: string, emailResponse: Object }>}
+ */
+export const sendInvoiceEmail = async (invoiceData) => { ... };
+
+/**
+ * Send a minimal confirmation email (no itemised ticket list).
+ * @param {Object} data
+ * @param {string} data.name             - Buyer's name
+ * @param {string} data.email            - Buyer's email address
+ * @param {string} data.confirmationCode - Order confirmation code
+ * @returns {Promise<{ success: boolean, message: string }>}
+ */
+export const sendSimpleConfirmationEmail = async (data) => { ... };
+
+export const EMAIL_CONFIG = EMAILJS_CONFIG;
+```
+
+### Template fields
+
+Create a template in your EmailJS dashboard with these variables:
+
+| Field | Description |
+|-------|-------------|
+| `{{nombre}}` | Buyer's name |
+| `{{correo}}` | Buyer's email |
+| `{{asunto}}` | Subject line (includes confirmation code) |
+| `{{mensaje}}` | Full formatted invoice body |
+| `{{order_id}}` | Numeric order ID |
+| `{{confirmation_code}}` | Alphanumeric confirmation code |
+| `{{qr_image_url}}` | Public URL of the QR image |
+| `{{total_amount}}` | Formatted total (e.g. `₡25,000`) |
+
+Minimal template HTML:
+
+```html EmailJS template (template_factura)
+<h2>Purchase receipt — Fundación Corcovado</h2>
+
+<p>Dear {{nombre}},</p>
+<p>Thank you for your purchase. Here are your order details:</p>
+
+<div style="background:#f5f5f5;padding:15px;border-radius:5px">
+  <p><strong>Confirmation code:</strong> {{confirmation_code}}</p>
+  <p><strong>Email:</strong> {{correo}}</p>
+  <p><strong>Total:</strong> {{total_amount}}</p>
+</div>
+
+<pre style="white-space:pre-wrap;background:#f9f9f9;padding:10px">{{mensaje}}</pre>
+
+<p>Present your QR code on the day of your visit.</p>
+<p>Questions? Contact us at info@fundacioncorcovado.org</p>
+```
+
+### Error handling and fallback
+
+`sendInvoiceEmail` attempts the primary template first. If it fails (e.g. the template does not exist in the EmailJS dashboard), it retries automatically with `fallbackTemplateId`.
+
+```javascript emailInvoiceService.js
+try {
+  response = await emailjs.send(
+    EMAILJS_CONFIG.serviceId,
+    EMAILJS_CONFIG.templateId,   // template_factura
+    emailData,
+    EMAILJS_CONFIG.publicKey
+  );
+} catch (templateError) {
+  // Retry with the fallback template
+  response = await emailjs.send(
+    EMAILJS_CONFIG.serviceId,
+    EMAILJS_CONFIG.fallbackTemplateId,  // template_cho3xqg
+    emailData,
+    EMAILJS_CONFIG.publicKey
+  );
+}
+```
+
+EmailJS HTTP error codes handled explicitly:
+
+| Status | Meaning | Logged message |
+|--------|---------|----------------|
+| `412` | Missing required template field | `Error 412: Faltan campos requeridos en el template` |
+| `400` | Invalid data sent to EmailJS | `Error 400: Datos inválidos para el envío` |
+| other | Generic EmailJS error | `Error EmailJS: <error.text>` |
+
+<Tip>
+  A failed email does **not** fail the purchase. The order is confirmed and the QR is generated regardless of email delivery. Notify the buyer via the UI if `sendInvoiceEmail` returns `{ success: false }`.
+</Tip>
+
+---
+
+## Integration in the purchase flow
+
+`TicketeraForm.jsx` wires both services together after a successful payment:
+
+```javascript TicketeraForm.jsx
+import { createAnonymousPurchase } from '@/services/anonymousPurchaseService';
+import { sendInvoiceEmail } from '@/services/emailInvoiceService';
+
+// After successful payment callback:
+const purchaseResult = await createAnonymousPurchase(purchaseData);
+
+if (purchaseResult.success) {
+  const orderData = purchaseResult.data;
+  const qrUrl = `${import.meta.env.VITE_BACKEND_URL}/media/${orderData.qr_image}`;
+
+  const emailResult = await sendInvoiceEmail({
+    email: buyer.email,
+    purchaseOrder: orderData,
+    qrImageUrl: qrUrl,
+    tickets: ticketDetails
+  });
+
+  if (!emailResult.success) {
+    toast.warn('Purchase confirmed, but the invoice email could not be sent.');
+  }
+}
+```
+
+---
+
+## Manual recovery
+
+<CodeGroup>
+
+```python Regenerate a QR (Django shell)
+from api.utils import generate_qr_code
+from api.purchase_orders.models import PurchaseOrders
+
+order = PurchaseOrders.objects.get(id=123)
+generate_qr_code(order)
+```
+
+```javascript Resend an invoice email (browser console)
+import { sendInvoiceEmail } from './services/emailInvoiceService';
+
+const testData = {
+  email: 'test@example.com',
+  purchaseOrder: {
+    id: 123,
+    confirmation_code: 'TEST-12345',
+    customer_name: 'Test Buyer',
+    total_price: 25000,
+    total_crc: 25000,
+    total_usd: 0
+  },
+  tickets: [
+    { name: 'General admission', quantity: 2, price: 12500, subtotal: 25000, currency: 'CRC' }
+  ]
+};
+
+sendInvoiceEmail(testData);
+```
+
+</CodeGroup>
+
+---
+
+## Installing the frontend dependency
+
+```bash
+npm install @emailjs/browser
+```
+
+The package is already listed in `package.json` as `"@emailjs/browser": "^4.4.1"`.

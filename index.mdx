@@ -1,97 +1,73 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "Parque Marino del Pacífico Sur"
+description: "Platform documentation for Costa Rica's Southern Pacific Marine Park — ticket purchasing, species exploration, education, and conservation."
 ---
 
-## Setting up
-
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Get Started" icon="rocket" href="/getting-started/backend-setup">
+    Set up the backend and frontend in minutes
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Ticketing & Visits" icon="ticket" href="/features/ticketing-and-visits">
+    Purchase tickets and book visits — no account required
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="API Reference" icon="code" href="/api/authentication">
+    Explore the full REST API for all platform resources
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="Marine Species" icon="fish" href="/features/species-and-exhibits">
+    Interactive database of marine animals, habitats, and conservation status
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## About the platform
 
-Everything you need to create world-class documentation.
+The **Parque Marino del Pacífico Sur** platform is a full-stack web application built with **React + Vite** on the frontend and **Django REST Framework** on the backend. It centralizes the park's digital presence, enabling visitors, researchers, volunteers, and administrators to interact with the park in a single unified system.
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
+<CardGroup cols={3}>
+  <Card title="Anonymous Purchasing" icon="shopping-cart">
+    Buy tickets without creating an account. Confirmation codes and QR-based entry included.
   </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
+  <Card title="Marine Species DB" icon="database">
+    Browse species with habitat, conservation status, and scientific metadata.
   </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
+  <Card title="Donations & Volunteering" icon="hand-holding-heart">
+    Support conservation through PayPal donations or volunteer sign-ups.
   </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
+  <Card title="Educational Programs" icon="graduation-cap">
+    Register for workshops and guided educational tours.
   </Card>
-</Columns>
+  <Card title="Transparency Portal" icon="chart-bar">
+    View financial and environmental impact reports.
+  </Card>
+  <Card title="Admin Dashboard" icon="gauge">
+    Manage inventory, audit logs, and institutional operations.
+  </Card>
+</CardGroup>
 
-## Need inspiration?
+## Tech stack
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+| Layer | Technology |
+|---|---|
+| Frontend | React 19, Vite, Tailwind CSS 4, React Router v7 |
+| Backend | Django 5.2, Django REST Framework 3.16, SimpleJWT |
+| Database | SQLite (dev), MySQL (production) |
+| Payments | PayPal SDK, SINPE Móvil |
+| Storage | Supabase Storage |
+| Email | EmailJS |
+| QR Codes | Python `qrcode` library + SHA-256 verification |
+
+## Navigation
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="sitemap" href="/architecture">
+    Understand how frontend, backend, and integrations connect
+  </Card>
+  <Card title="Environment Variables" icon="key" href="/getting-started/environment-variables">
+    Required configuration for all services
+  </Card>
+  <Card title="QR + Email Integration" icon="qrcode" href="/integrations/qr-and-email">
+    Automatic QR generation and email invoice delivery
+  </Card>
+  <Card title="Research & Conservation" icon="leaf" href="/features/research-and-conservation">
+    Aquaculture, rescue centers, and active projects
+  </Card>
+</CardGroup>

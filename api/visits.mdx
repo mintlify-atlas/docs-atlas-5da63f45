@@ -1,0 +1,187 @@
+---
+title: "Visits"
+description: "Register and query visit dates. All future dates are open — the system records selected dates for informational purposes only."
+---
+
+A **Visit** records a date selected by a buyer. The system uses a high default capacity (`total_slots = 9999`) so that no date is ever genuinely unavailable. If a visit record for a given date does not exist yet, the `POST /create/` endpoint creates it automatically.
+
+<Note>
+  This is a **simplified scheduling system**. Capacity enforcement exists in the model but is not enforced in practice — `total_slots` is intentionally set to `9999` to allow unlimited selections for any date.
+</Note>
+
+## Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/visits/` | Public | List all visits |
+| `GET` | `/api/visits/available/` | Public | List visits with open slots |
+| `POST` | `/api/visits/create/` | Public | Create visit or return existing for date |
+| `GET` | `/api/visits/by_day/?date=YYYY-MM-DD` | Public | Look up a visit by exact date |
+| `GET` | `/api/visits/{id}/` | Public | Retrieve a single visit |
+| `PUT` | `/api/visits/{id}/update/` | Admin | Update a visit record |
+| `DELETE` | `/api/visits/{id}/delete/` | Admin | Delete a visit record |
+
+---
+
+## GET /api/visits/
+
+Returns all visit records, ordered by date descending.
+
+```bash
+curl https://api.parquemarino.cr/api/visits/
+```
+
+```json
+[
+  {
+    "id": 12,
+    "day": "2025-04-10",
+    "total_slots": 9999,
+    "occupied_slots": 8
+  },
+  {
+    "id": 11,
+    "day": "2025-04-05",
+    "total_slots": 9999,
+    "occupied_slots": 3
+  }
+]
+```
+
+---
+
+## GET /api/visits/available/
+
+Returns visit records where `available_slots > 0`. Each object includes the computed `available_slots` field.
+
+### Response fields
+
+<ResponseField name="visits" type="array">
+  Array of visit objects with open capacity.
+  <Expandable title="Visit object">
+    <ResponseField name="id" type="integer">
+      Unique visit identifier.
+    </ResponseField>
+    <ResponseField name="day" type="string (date)">
+      The visit date in `YYYY-MM-DD` format.
+    </ResponseField>
+    <ResponseField name="total_slots" type="integer">
+      Maximum capacity for this date. Default `9999`.
+    </ResponseField>
+    <ResponseField name="occupied_slots" type="integer">
+      Number of slots already occupied by purchase orders.
+    </ResponseField>
+    <ResponseField name="available_slots" type="integer">
+      Computed: `total_slots - occupied_slots`. Only present on this endpoint.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="total_available" type="integer">
+  Count of visit records returned.
+</ResponseField>
+
+```bash
+curl https://api.parquemarino.cr/api/visits/available/
+```
+
+---
+
+## POST /api/visits/create/
+
+Creates a new visit for a date, or returns the existing visit if one already exists for that date. This endpoint is public and is called automatically by the anonymous purchase flow.
+
+**Idempotent behavior:** if a visit already exists for the given `day`, the server returns `200 OK` with the existing record instead of creating a duplicate.
+
+### Request body
+
+<ParamField body="day" type="string" required>
+  Visit date in `YYYY-MM-DD` format.
+</ParamField>
+
+<ParamField body="total_slots" type="integer" default={9999}>
+  Override the default capacity. Omit to use the system default.
+</ParamField>
+
+```bash
+curl -X POST https://api.parquemarino.cr/api/visits/create/ \
+  -H "Content-Type: application/json" \
+  -d '{"day": "2025-05-20"}'
+```
+
+**Created (new date) — `201 Created`:**
+```json
+{
+  "id": 15,
+  "day": "2025-05-20",
+  "total_slots": 9999,
+  "occupied_slots": 0
+}
+```
+
+**Existing date — `200 OK`:**
+```json
+{
+  "id": 9,
+  "day": "2025-05-20",
+  "total_slots": 9999,
+  "occupied_slots": 5
+}
+```
+
+---
+
+## GET /api/visits/by_day/
+
+Looks up a visit record by exact date. Returns `404` if no visit exists for that date.
+
+### Query parameters
+
+<ParamField query="date" type="string" required>
+  The visit date to look up, in `YYYY-MM-DD` format.
+</ParamField>
+
+```bash
+curl "https://api.parquemarino.cr/api/visits/by_day/?date=2025-05-20"
+```
+
+```json
+{
+  "id": 15,
+  "day": "2025-05-20",
+  "total_slots": 9999,
+  "occupied_slots": 2
+}
+```
+
+**Error — date not found:**
+```json
+{
+  "error": "Visit not found for the specified date"
+}
+```
+
+---
+
+## Model reference
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `integer` | Auto-generated primary key |
+| `day` | `date` | Visit date — unique per record |
+| `total_slots` | `integer` | Capacity ceiling, default `9999` |
+| `occupied_slots` | `integer` | Occupied count, starts at `0` |
+
+**Computed property** (not stored):
+
+| Property | Formula |
+|----------|---------|
+| `available_slots` | `total_slots - occupied_slots` |
+
+### Slot methods (internal)
+
+| Method | Description |
+|--------|-------------|
+| `occupy_slots(n)` | Increments `occupied_slots` by `n` if capacity allows; returns `bool` |
+| `free_slots(n)` | Decrements `occupied_slots` by `n`; raises `ValueError` if `n > occupied_slots` |
+| `has_available_slots(n)` | Returns `True` if at least `n` slots are free |

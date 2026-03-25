@@ -1,0 +1,505 @@
+---
+title: "Purchase Orders"
+description: "Create and manage ticket purchase orders. Supports fully anonymous checkout with automatic QR code generation and email invoice delivery."
+---
+
+A **Purchase Order** records a completed or pending ticket transaction. Orders can be created by authenticated users or completely anonymously — no account required. Each order is linked to a **Visit** date and one or more **TicketsPurchaseOrder** line items.
+
+After creation, a QR code is automatically generated (via a Django signal) and a confirmation email is sent via EmailJS.
+
+## Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/purchase_orders/anonymous/` | **Public** | Create an anonymous purchase |
+| `GET` | `/api/purchase_orders/validate_qr/` | Public | Validate a single QR code |
+| `POST` | `/api/purchase_orders/validate-bulk-qr/` | Public | Validate multiple QR codes |
+| `GET` | `/api/purchase_orders/` | Auth | List orders (admin: all; user: own) |
+| `GET` | `/api/purchase_orders/{id}/` | Auth | Retrieve a single order |
+| `POST` | `/api/purchase_orders/create/` | Auth | Create an authenticated order |
+| `PUT` | `/api/purchase_orders/{id}/update/` | Auth | Update an order |
+| `DELETE` | `/api/purchase_orders/{id}/delete/` | Auth | Delete an order |
+| `GET` | `/api/tickets_purchase_orders/` | Admin | List ticket line items |
+
+---
+
+## POST /api/purchase_orders/anonymous/
+
+The primary public endpoint for ticket purchases. No authentication or account is needed — only an email address.
+
+The service layer validates stock and visit capacity, creates the order atomically, decrements `occupied_slots` on each ticket, and increments `occupied_slots` on the selected visit.
+
+<Note>
+  A QR image is generated automatically after the order is saved (via `post_save` signal). The `qr_image` URL will be available when you retrieve the order by ID.
+</Note>
+
+### Request body
+
+<ParamField body="email" type="string" required>
+  Buyer's email address. Used as the sole identifier for anonymous orders. Must contain `@`.
+</ParamField>
+
+<ParamField body="tickets" type="array" required>
+  One or more ticket line items to purchase.
+  <Expandable title="Ticket item object">
+    <ParamField body="ticket_id" type="integer" required>
+      The ID of the `Tickets` record to purchase.
+    </ParamField>
+    <ParamField body="quantity" type="integer" required>
+      Number of tickets. Must be `>= 1`.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="visit_id" type="integer" required>
+  ID of the `Visits` record for the selected date. Create or look up a visit first using `POST /api/visits/create/`.
+</ParamField>
+
+<ParamField body="payment_method_id" type="integer" required>
+  Numeric ID of the payment method:
+  - `1` — Card
+  - `2` — PayPal
+  - `3` — Cash
+</ParamField>
+
+### curl example
+
+```bash
+curl -X POST https://api.parquemarino.cr/api/purchase_orders/anonymous/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "visitante@ejemplo.com",
+    "tickets": [
+      {"ticket_id": 1, "quantity": 2},
+      {"ticket_id": 3, "quantity": 1}
+    ],
+    "visit_id": 15,
+    "payment_method_id": 1
+  }'
+```
+
+### JavaScript example
+
+```javascript
+const response = await fetch('/api/purchase_orders/anonymous/', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    email: 'visitante@ejemplo.com',
+    tickets: [
+      { ticket_id: 1, quantity: 2 },
+      { ticket_id: 3, quantity: 1 }
+    ],
+    visit_id: 15,
+    payment_method_id: 1
+  })
+});
+
+const data = await response.json();
+console.log(data.confirmation_code); // "ANON-42"
+```
+
+### Response — `201 Created`
+
+<ResponseField name="success" type="boolean">
+  `true` on successful order creation.
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Human-readable confirmation message.
+</ResponseField>
+
+<ResponseField name="order_id" type="integer">
+  The newly created `PurchaseOrders` primary key.
+</ResponseField>
+
+<ResponseField name="confirmation_code" type="string">
+  Unique code for this order, formatted as `ANON-{order_id}`. Use this to track or reference the purchase.
+</ResponseField>
+
+<ResponseField name="total" type="decimal">
+  Combined total price across all currencies (simplified sum). For per-currency breakdowns, retrieve the order by ID.
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  The email address confirmed for this order.
+</ResponseField>
+
+```json
+{
+  "success": true,
+  "message": "Compra realizada exitosamente",
+  "order_id": 42,
+  "confirmation_code": "ANON-42",
+  "total": "38000.00",
+  "email": "visitante@ejemplo.com"
+}
+```
+
+### Error responses
+
+| Scenario | Status | Response |
+|----------|--------|----------|
+| Missing `email` | `400` | `{"error": "Email es requerido para compras anónimas"}` |
+| No tickets selected | `400` | `{"error": "Debe seleccionar al menos un ticket"}` |
+| Invalid ticket ID | `400` | `{"error": "Ticket con ID X no existe"}` |
+| Quantity `<= 0` | `400` | `{"error": "Cantidad debe ser mayor a 0 para el ticket ..."}` |
+| Ticket out of stock | `400` | `{"error": "Stock insuficiente para ... Disponible: N, Solicitado: M"}` |
+| Visit not found | `400` | `{"error": "La visita con ID X no existe"}` |
+| Visit capacity exceeded | `400` | `{"error": "No hay cupos suficientes en la visita. Disponibles: N, Solicitados: M"}` |
+| Invalid payment method | `400` | `{"error": "Método de pago con ID X no existe"}` |
+
+---
+
+## GET /api/purchase_orders/validate_qr/
+
+Validates a scanned QR code and returns the order status and access decision. No authentication required — intended for use at the park entrance.
+
+Supports three QR formats:
+- **JSON** (primary): `{"order_id": 42, "email": "...", "verification": "abc123..."}` — includes SHA-256 integrity check
+- **Legacy full**: `Order ID: 42 | Email: visitante@ejemplo.com`
+- **Simple**: `42` (order ID only)
+
+### Query parameters
+
+<ParamField query="data" type="string" required>
+  The raw string content from the scanned QR code. For JSON format, pass the JSON string directly.
+</ParamField>
+
+### curl example
+
+```bash
+# JSON format (recommended)
+curl "https://api.parquemarino.cr/api/purchase_orders/validate_qr/?data=%7B%22order_id%22%3A42%2C%22email%22%3A%22visitante%40ejemplo.com%22%2C%22verification%22%3A%22a1b2c3d4%22%7D"
+
+# Simple format
+curl "https://api.parquemarino.cr/api/purchase_orders/validate_qr/?data=42"
+```
+
+### Response
+
+<ResponseField name="valid" type="boolean">
+  Whether the QR data is structurally valid and the order exists.
+</ResponseField>
+
+<ResponseField name="access_granted" type="boolean">
+  `true` only when `status == "PAID"`. Use this field to make the gate decision.
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Current order status: `PAID`, `PENDING`, `CANCELLED`, or `FAILED`.
+</ResponseField>
+
+<ResponseField name="detail" type="string">
+  Human-readable message describing the access decision.
+</ResponseField>
+
+<ResponseField name="order_id" type="integer">
+  The matched order ID.
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  Email address on the order.
+</ResponseField>
+
+<ResponseField name="visit_date" type="string">
+  ISO date of the visit (`YYYY-MM-DD`).
+</ResponseField>
+
+<ResponseField name="total_tickets" type="integer">
+  Total number of tickets across all line items.
+</ResponseField>
+
+<ResponseField name="total_price_crc" type="number">
+  Total amount in Costa Rican colones.
+</ResponseField>
+
+<ResponseField name="total_price_usd" type="number">
+  Total amount in US dollars.
+</ResponseField>
+
+<ResponseField name="tickets_detail" type="array">
+  Per-ticket breakdown.
+  <Expandable title="Ticket detail object">
+    <ResponseField name="ticket_name" type="string">Ticket type name.</ResponseField>
+    <ResponseField name="quantity" type="integer">Number of units purchased.</ResponseField>
+    <ResponseField name="price_per_ticket" type="number">Unit price.</ResponseField>
+    <ResponseField name="subtotal" type="number">Line total.</ResponseField>
+    <ResponseField name="currency" type="string">`CRC` or `USD`.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="verification_passed" type="boolean">
+  `true` if the QR was in JSON format and the SHA-256 hash matched. Always `false` for legacy formats.
+</ResponseField>
+
+**Paid order — access granted:**
+```json
+{
+  "valid": true,
+  "access_granted": true,
+  "status": "PAID",
+  "detail": "QR válido. Orden pagada correctamente. Acceso autorizado.",
+  "order_id": 42,
+  "email": "visitante@ejemplo.com",
+  "visit_date": "2025-05-20",
+  "total_tickets": 3,
+  "total_price_crc": 38000.0,
+  "total_price_usd": 0.0,
+  "tickets_detail": [
+    {
+      "ticket_name": "Entrada General",
+      "quantity": 2,
+      "price_per_ticket": 15000.0,
+      "subtotal": 30000.0,
+      "currency": "CRC"
+    },
+    {
+      "ticket_name": "Entrada Niño",
+      "quantity": 1,
+      "price_per_ticket": 8000.0,
+      "subtotal": 8000.0,
+      "currency": "CRC"
+    }
+  ],
+  "verification_passed": true
+}
+```
+
+**Pending order — access denied:**
+```json
+{
+  "valid": true,
+  "access_granted": false,
+  "status": "PENDING",
+  "payment_required": true,
+  "detail": "Orden válida pero pendiente de pago. Acceso denegado."
+}
+```
+
+---
+
+## POST /api/purchase_orders/validate-bulk-qr/
+
+Validates up to **100 QR codes** in a single request. Useful for pre-checking a group booking or auditing a batch of tickets at the entrance.
+
+### Request body
+
+<ParamField body="qr_codes" type="array" required>
+  List of raw QR strings to validate. Maximum 100 items per request. Supports all three QR formats (JSON, legacy full, simple).
+</ParamField>
+
+```bash
+curl -X POST https://api.parquemarino.cr/api/purchase_orders/validate-bulk-qr/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "qr_codes": [
+      "{\\"order_id\\": 42, \\"email\\": \\"a@b.com\\", \\"verification\\": \\"abc123\\"}",
+      "Order ID: 43 | Email: c@d.com",
+      "44"
+    ]
+  }'
+```
+
+### Response
+
+<ResponseField name="total_processed" type="integer">
+  Number of QR codes submitted.
+</ResponseField>
+
+<ResponseField name="valid_count" type="integer">
+  Number of QR codes that resolved to a `PAID` order.
+</ResponseField>
+
+<ResponseField name="invalid_count" type="integer">
+  Number of QR codes that failed validation.
+</ResponseField>
+
+<ResponseField name="success_rate" type="number">
+  Percentage of valid QRs, rounded to 2 decimal places.
+</ResponseField>
+
+<ResponseField name="results" type="array">
+  Per-QR result objects.
+  <Expandable title="Result object">
+    <ResponseField name="index" type="integer">Zero-based position in the submitted array.</ResponseField>
+    <ResponseField name="order_id" type="integer">Matched order ID (if found).</ResponseField>
+    <ResponseField name="valid" type="boolean">Whether this QR grants access.</ResponseField>
+    <ResponseField name="access_granted" type="boolean">`true` only for `PAID` orders.</ResponseField>
+    <ResponseField name="status" type="string">Order status string.</ResponseField>
+    <ResponseField name="detail" type="string">Human-readable result message.</ResponseField>
+    <ResponseField name="email" type="string">Email on the order.</ResponseField>
+    <ResponseField name="visit_date" type="string">Visit date (`YYYY-MM-DD`).</ResponseField>
+    <ResponseField name="total_tickets" type="integer">Total ticket count.</ResponseField>
+    <ResponseField name="total_price_crc" type="number">Total in CRC.</ResponseField>
+    <ResponseField name="qr_format" type="string">`JSON`, `Legacy`, or `Invalid`.</ResponseField>
+    <ResponseField name="verification_passed" type="boolean">SHA-256 check result (JSON format only).</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```json
+{
+  "total_processed": 3,
+  "valid_count": 2,
+  "invalid_count": 1,
+  "success_rate": 66.67,
+  "results": [
+    {
+      "index": 0,
+      "order_id": 42,
+      "valid": true,
+      "access_granted": true,
+      "status": "PAID",
+      "detail": "✅ QR válido. Acceso autorizado.",
+      "email": "a@b.com",
+      "visit_date": "2025-05-20",
+      "total_tickets": 2,
+      "total_price_crc": 30000.0,
+      "qr_format": "JSON",
+      "verification_passed": true
+    },
+    {
+      "index": 1,
+      "order_id": 43,
+      "valid": true,
+      "access_granted": true,
+      "status": "PAID",
+      "detail": "✅ QR válido. Acceso autorizado.",
+      "qr_format": "Legacy",
+      "verification_passed": true
+    },
+    {
+      "index": 2,
+      "order_id": null,
+      "valid": false,
+      "status": null,
+      "detail": "Orden no encontrada.",
+      "qr_format": "Legacy"
+    }
+  ]
+}
+```
+
+<Warning>
+  The bulk endpoint has a hard limit of 100 QR codes per request. Requests with more than 100 items return `400 Bad Request`.
+</Warning>
+
+---
+
+## GET /api/tickets_purchase_orders/
+
+Lists all `TicketsPurchaseOrder` line items (the join table between an order and a ticket type). Primarily used by admins to audit what was purchased in each order.
+
+<Note>
+  This endpoint is at the URL prefix `/api/tickets_purchase_orders/`, separate from `/api/purchase_orders/`.
+</Note>
+
+### Response fields
+
+<ResponseField name="id" type="integer">
+  Line item primary key.
+</ResponseField>
+
+<ResponseField name="purchase_order" type="integer">
+  Foreign key to the parent `PurchaseOrders` record.
+</ResponseField>
+
+<ResponseField name="ticket" type="integer">
+  Foreign key to the `Tickets` record.
+</ResponseField>
+
+<ResponseField name="amount" type="integer">
+  Quantity purchased for this ticket type in this order.
+</ResponseField>
+
+<ResponseField name="subtotal" type="decimal">
+  Computed read-only property: `amount × ticket.price`.
+</ResponseField>
+
+```json
+[
+  {
+    "id": 1,
+    "purchase_order": 42,
+    "ticket": 1,
+    "amount": 2,
+    "subtotal": "30000.00"
+  },
+  {
+    "id": 2,
+    "purchase_order": 42,
+    "ticket": 3,
+    "amount": 1,
+    "subtotal": "8000.00"
+  }
+]
+```
+
+---
+
+## Model reference
+
+### PurchaseOrders
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `integer` | Auto-generated primary key |
+| `order_date` | `date` | Set automatically on creation |
+| `purchase_date` | `date` | Set automatically on creation |
+| `email` | `string` | Buyer's email (max 50 chars) |
+| `status` | `string` | `PENDING` \| `PAID` \| `CANCELLED` \| `FAILED` |
+| `total_price` | `decimal(12,2)` | Combined total across all currencies |
+| `total_crc` | `decimal(12,2)` | Subtotal for CRC-denominated tickets |
+| `total_usd` | `decimal(12,2)` | Subtotal for USD-denominated tickets |
+| `qr_image` | `image` | Auto-generated QR image path (under `qr_codes/`) |
+| `visit` | `FK → Visits` | The selected visit date |
+| `user` | `FK → User \| null` | `null` for anonymous orders |
+
+### TicketsPurchaseOrder (line items)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `integer` | Auto-generated primary key |
+| `purchase_order` | `FK → PurchaseOrders` | Parent order |
+| `ticket` | `FK → Tickets` | Ticket type |
+| `amount` | `integer` | Quantity purchased |
+| `subtotal` | `decimal` | Computed: `amount × ticket.price` (read-only property) |
+
+---
+
+## QR code format
+
+Each order generates a QR image automatically via a `post_save` Django signal. The QR encodes a JSON payload:
+
+```json
+{
+  "order_id": 42,
+  "confirmation_code": "ANON-42",
+  "customer_email": "visitante@ejemplo.com",
+  "visit_date": "2025-05-20T00:00:00Z",
+  "total_price": 38000.00,
+  "status": "PAID",
+  "created_at": "2025-05-15T14:30:00Z",
+  "verification_hash": "a1b2c3d4e5f6g7h8"
+}
+```
+
+The `verification_hash` is a 16-character prefix of the SHA-256 digest computed from `{order_id}-{email}-{purchase_date}-{total_price_crc}`. The `validate_qr` endpoint re-computes this hash on every request to detect altered QR data.
+
+<Warning>
+  Only QR codes in the JSON format carry a `verification_hash`. Legacy and simple formats skip integrity verification. For production gate control, only accept JSON-format QRs.
+</Warning>
+
+---
+
+## Anonymous purchase flow
+
+The complete end-to-end flow for a guest buyer:
+
+1. **Get available tickets** — `GET /api/tickets/available/`
+2. **Create or retrieve a visit** for the desired date — `POST /api/visits/create/`
+3. **Submit the purchase** — `POST /api/purchase_orders/anonymous/`
+4. **Receive confirmation** — the response includes `confirmation_code` and `order_id`
+5. **QR generated automatically** — available on the order record as `qr_image`
+6. **Email invoice sent** — the frontend triggers EmailJS after a successful response
+7. **Entry validation** — staff scan the QR at the gate using `GET /api/purchase_orders/validate_qr/`

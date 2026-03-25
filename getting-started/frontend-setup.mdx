@@ -1,0 +1,199 @@
+---
+title: 'Frontend setup'
+description: 'Set up the React + Vite frontend for Parque Marino del Pacífico Sur on your local machine.'
+keywords: ['react', 'vite', 'frontend', 'setup', 'installation', 'parque marino']
+---
+
+## Prerequisites
+
+Before you begin, make sure you have the following installed:
+
+- **Node.js 18+** — verify with `node --version`
+- **npm 9+** — included with Node.js; verify with `npm --version`
+- A running backend server at `http://localhost:8000` (see [Backend setup](/getting-started/backend-setup))
+
+## Tech stack overview
+
+The frontend is a React 19 single-page application built with Vite 6 and styled with Tailwind CSS 4.
+
+| Package | Version | Purpose |
+|---|---|---|
+| React | 19.0.0 | UI framework |
+| Vite | 6.3.1 | Build tool and dev server |
+| Tailwind CSS | 4.1.5 | Utility-first CSS |
+| React Router DOM | 7.6.0 | Client-side routing |
+| Axios | 1.9.0 | HTTP client |
+| @emailjs/browser | 4.4.1 | Email sending |
+| @paypal/react-paypal-js | 8.8.3 | PayPal payments |
+| Formik + Yup | 2.4.6 / 1.6.1 | Form handling and validation |
+| Radix UI | various | Accessible component primitives |
+
+## Setup steps
+
+<Steps>
+  <Step title="Navigate to the frontend directory">
+    From the repository root:
+
+    ```bash
+    cd Proyecto_Final-1/frontend
+    ```
+  </Step>
+
+  <Step title="Install dependencies">
+    ```bash
+    npm install
+    ```
+
+    This installs all dependencies listed in `package.json`, including React, Vite, Tailwind CSS, and all UI libraries.
+  </Step>
+
+  <Step title="Configure environment variables">
+    There is no `.env.example` file in the repository. Create a `.env` file in the `frontend/` directory with the following variables:
+
+    ```env .env
+    # Backend API URL
+    VITE_BACKEND_URL=http://localhost:8000
+
+    # EmailJS — invoice and confirmation emails
+    VITE_EMAILJS_SERVICE_ID=your_service_id
+    VITE_EMAILJS_TEMPLATE_ID=your_template_id
+    VITE_EMAILJS_PUBLIC_KEY=your_public_key
+    ```
+
+    <Note>
+      The PayPal client ID is currently loaded as a hardcoded `<script>` tag in `index.html` rather than an environment variable. To update it, edit the `client-id` query parameter in the PayPal SDK script tag in `frontend/index.html`.
+    </Note>
+
+    See the [Environment variables](/getting-started/environment-variables) page for a full description of each variable.
+  </Step>
+
+  <Step title="Start the development server">
+    ```bash
+    npm run dev
+    ```
+
+    Vite will start a local development server. The output will show the URL, typically:
+
+    ```
+    VITE v6.3.1  ready in Xms
+
+    ➜  Local:   http://localhost:5173/
+    ➜  Network: use --host to expose
+    ```
+
+    Open `http://localhost:5173` in your browser.
+  </Step>
+</Steps>
+
+## Build for production
+
+To compile an optimised static build:
+
+```bash
+npm run build
+```
+
+The output is written to `frontend/dist/`. Preview the production build locally with:
+
+```bash
+npm run preview
+```
+
+## Vite configuration
+
+The `vite.config.js` file configures the build tool with the following settings:
+
+```javascript vite.config.js
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
+import path from 'path'
+import { fileURLToPath } from 'url'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
+export default defineConfig({
+  plugins: [
+    react(),
+    tailwindcss()
+  ],
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, 'src'),
+      '@components': path.resolve(__dirname, 'src/components'),
+      '@api': path.resolve(__dirname, 'src/api'),
+      '@assets': path.resolve(__dirname, 'src/assets'),
+      '@context': path.resolve(__dirname, 'src/context'),
+      '@hooks': path.resolve(__dirname, 'src/hooks'),
+      '@pages': path.resolve(__dirname, 'src/pages'),
+      '@utils': path.resolve(__dirname, 'src/utils'),
+    }
+  }
+})
+```
+
+<Note>
+  There is no proxy configuration in `vite.config.js`. API requests to the backend use the absolute URL configured in `VITE_BACKEND_URL`. The Axios instance in `src/api/axiosInstance.js` defaults to `http://127.0.0.1:8000/` if the variable is not set.
+</Note>
+
+### Path aliases
+
+The following import aliases are available throughout the codebase:
+
+| Alias | Resolves to |
+|---|---|
+| `@` | `src/` |
+| `@components` | `src/components/` |
+| `@api` | `src/api/` |
+| `@assets` | `src/assets/` |
+| `@context` | `src/context/` |
+| `@hooks` | `src/hooks/` |
+| `@pages` | `src/pages/` |
+| `@utils` | `src/utils/` |
+
+## API communication
+
+All authenticated requests use the Axios instance in `src/api/axiosInstance.js`. It automatically:
+
+- Attaches the JWT access token from the `accessToken` cookie to every request
+- On a `401` or `403` response, attempts a silent token refresh using the `refreshToken` cookie
+- Redirects to `/login` if the refresh token is missing or expired
+
+```javascript src/api/axiosInstance.js
+const instance = axios.create({
+  baseURL: 'http://127.0.0.1:8000/',
+});
+```
+
+<Tip>
+  Set `VITE_BACKEND_URL` in your `.env` file and update the `baseURL` in `axiosInstance.js` to use `import.meta.env.VITE_BACKEND_URL` if you need to target a different backend host across environments.
+</Tip>
+
+## Linting
+
+The project uses ESLint with the `react-hooks` and `react-refresh` plugins. Run the linter with:
+
+```bash
+npm run lint
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="CORS errors in the browser">
+    If you see CORS errors, confirm that the backend's `DJANGO_CORS_ALLOWED_ORIGINS` includes your Vite dev server origin (default: `http://localhost:5173`). See [Backend setup](/getting-started/backend-setup) and [Environment variables](/getting-started/environment-variables).
+  </Accordion>
+
+  <Accordion title="Module not found errors">
+    If imports using the `@components` or `@api` aliases fail, confirm you are running `npm install` from inside the `frontend/` directory and that `vite.config.js` has not been modified.
+  </Accordion>
+
+  <Accordion title="PayPal SDK not loading">
+    The PayPal SDK is loaded via a `<script>` tag in `frontend/index.html`. If the PayPal buttons do not render, open the browser console and check for script errors. Verify that the `client-id` in `index.html` is a valid sandbox or live PayPal client ID.
+  </Accordion>
+
+  <Accordion title="Email sending fails">
+    If invoice emails are not sent, verify that your EmailJS service ID, template ID, and public key in `.env` are correct. The `sendInvoiceEmail` function in `src/services/emailInvoiceService.js` will fall back to `template_cho3xqg` if the primary template is not found.
+  </Accordion>
+</AccordionGroup>

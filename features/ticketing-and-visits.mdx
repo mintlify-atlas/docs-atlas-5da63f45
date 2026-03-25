@@ -1,0 +1,276 @@
+---
+title: 'Ticketing and visits'
+description: 'Complete guide to the anonymous ticket purchase flow, visit date selection, payment methods, and QR code generation for Parque Marino del Pacífico Sur.'
+keywords: ['tickets', 'compra anónima', 'visitas', 'QR', 'pago', 'SINPE']
+---
+
+The ticketing system allows any visitor to purchase admission tickets without creating an account. The purchase flow is handled by `anonymousPurchaseService.js` and the `POST /api/purchase_orders/anonymous/` endpoint, which creates an order with `is_anonymous = true` and a unique confirmation code.
+
+<Note>
+Visit dates are informational only. All future dates are valid — there are no hard capacity restrictions. The system creates visit records with `total_slots = 9999` to allow any volume of visitors.
+</Note>
+
+## Purchase flow
+
+<Steps>
+  <Step title="Select a visit date">
+    The visitor picks any future date from the calendar. The frontend calls `createOrGetVisit(date)` to register the date and receive a `visit_id`. If the backend is unreachable the form continues in offline mode and sets a temporary local ID.
+
+    ```javascript
+    // anonymousPurchaseService.js
+    export const createOrGetVisit = async (date) => {
+      // Validates YYYY-MM-DD format and rejects past dates
+      const visitData = {
+        day: date,
+        total_slots: 9999, // unlimited capacity
+        occupied_slots: 0
+      };
+      const response = await createVisit(visitData);
+      return { success: true, data: response };
+    };
+    ```
+
+    ```python
+    # visits/views.py
+    def create(self, request, *args, **kwargs):
+        mutable_data['total_slots'] = 9999
+        mutable_data['occupied_slots'] = 0
+    ```
+
+    <Info>If a visit record for the chosen date already exists the backend returns HTTP 400. The service treats this as a success and reuses the existing record.</Info>
+  </Step>
+
+  <Step title="Select tickets">
+    Available tickets are fetched from the public endpoint via `getAvailableTickets()`. Each ticket has a name, price, currency (`CRC` or `USD`), and available slot count. The visitor selects quantities; `validateTicketAvailability()` checks stock in real time before allowing the user to proceed.
+
+    ```javascript
+    // anonymousPurchaseService.js
+    export const getAvailableTickets = async () => {
+      const response = await getTickets();
+      // Normalises array from response.tickets, response.data, or root array
+      return { success: true, data: ticketsArray };
+    };
+
+    export const validateTicketAvailability = async (visitId, tickets) => {
+      // Checks availableTicket.available_slots >= requested quantity
+      // Checks selectedVisit.available_slots >= total tickets
+      return { success: true, message: 'Tickets disponibles para la compra' };
+    };
+    ```
+
+    The `Tickets` Django model defines the ticket catalogue:
+
+    ```python
+    # backend/api/tickets/models.py
+    class Tickets(models.Model):
+        name        = models.CharField(max_length=30, unique=True)
+        description = models.CharField(max_length=100)
+        price       = models.DecimalField(max_digits=10, decimal_places=2)
+        total_slots = models.PositiveIntegerField(default=1276)
+        occupied_slots = models.PositiveIntegerField(default=0)
+        currency    = models.CharField(
+            max_length=3,
+            choices=[('CRC', 'Colones'), ('USD', 'Dólares')],
+            default='CRC'
+        )
+    ```
+
+    Use `calculatePurchaseTotal()` to compute the order total before showing the summary:
+
+    ```javascript
+    // anonymousPurchaseService.js
+    export const calculatePurchaseTotal = (tickets, availableTickets) => {
+      // Iterates tickets, sums CRC and USD subtotals separately
+      return { totalCRC, totalUSD, total, details };
+    };
+    ```
+  </Step>
+
+  <Step title="Enter personal details">
+    The visitor provides their full name and email address. The email is the only identifier for anonymous purchases — it is stored on the order and used to send the invoice. Format is validated with `/^[^\s@]+@[^\s@]+\.[^\s@]+$/` before the request is sent.
+
+    The visitor also chooses a payment method at this step. Available methods are loaded from `getPaymentMethods()`.
+
+    ```javascript
+    // anonymousPurchaseService.js
+    export const getPaymentMethods = async () => {
+      // Falls back to default list if the API is unavailable
+      return {
+        success: true,
+        data: [
+          { id: 1, method: 'CARD',   label: 'Tarjeta' },
+          { id: 2, method: 'PAYPAL', label: 'PayPal' },
+          { id: 3, method: 'CASH',   label: 'Efectivo/SINPE' }
+        ]
+      };
+    };
+    ```
+  </Step>
+
+  <Step title="Payment">
+    The form renders the appropriate payment component based on the method selected in the previous step.
+
+    <Tabs>
+      <Tab title="Card (CARD)">
+        Visa and Mastercard are handled by the `CardPayment` component. The payment method string sent to the backend is `"CARD"`.
+      </Tab>
+      <Tab title="PayPal (PAYPAL)">
+        PayPal is handled by the `PaypalPayment` component. The payment method string is `"PAYPAL"`.
+      </Tab>
+      <Tab title="SINPE / Cash (CASH)">
+        SINPE Móvil and cash payments both map to `"CASH"` in the Django model. The `CashPayment` component handles both.
+      </Tab>
+    </Tabs>
+
+    The service maps numeric IDs to backend strings before submission:
+
+    ```javascript
+    // anonymousPurchaseService.js
+    const PAYMENT_METHOD_MAP = {
+      1: "CARD",   // Tarjeta
+      2: "PAYPAL", // PayPal
+      3: "CASH",   // Efectivo/SINPE
+      4: "CASH",   // SINPE Móvil
+      5: "CASH"    // Efectivo
+    };
+    ```
+  </Step>
+
+  <Step title="Confirmation and QR code">
+    On successful payment `createAnonymousPurchase()` sends the complete order to the backend:
+
+    ```javascript
+    // anonymousPurchaseService.js
+    export const createAnonymousPurchase = async (purchaseData) => {
+      const response = await axiosInstance.post(
+        '/api/purchase_orders/anonymous/',
+        {
+          email:          purchaseData.email,
+          tickets:        purchaseData.tickets, // [{ ticket_id, quantity }]
+          visit_id:       purchaseData.visit_id,
+          payment_method: paymentMethod         // 'CARD' | 'PAYPAL' | 'CASH'
+        }
+      );
+      return { success: true, data: response.data };
+    };
+    ```
+
+    The backend creates the purchase order with `user = null` and `is_anonymous = true`, then fires a Django signal that generates a QR code automatically:
+
+    ```python
+    # api/purchase_orders/signals.py
+    @receiver(post_save, sender=PurchaseOrders)
+    def create_qr_on_order(sender, instance, created, **kwargs):
+        if created and not instance.qr_image:
+            generate_qr_code(instance)
+    ```
+
+    The QR payload includes a SHA-256 verification hash:
+
+    ```json
+    {
+      "order_id": 123,
+      "confirmation_code": "ANON-ABC12345",
+      "customer_email": "cliente@email.com",
+      "visit_date": "2024-01-15T10:00:00Z",
+      "total_price": 25000.00,
+      "status": "PAID",
+      "created_at": "2024-01-10T14:30:00Z",
+      "verification_hash": "<sha256_hash>"
+    }
+    ```
+
+    An invoice email is then dispatched via EmailJS with the confirmation code, order details, and a link to the QR image. The purchase is considered complete even if the email step fails.
+
+    <Tip>Present the QR code at the park entrance on the day of the visit. Staff scan it to validate the `confirmation_code` and mark the order as used.</Tip>
+  </Step>
+</Steps>
+
+## Importing the service
+
+```javascript
+import {
+  createAnonymousPurchase,
+  getAvailableTickets,
+  getAvailableVisits,
+  getPaymentMethods,
+  createOrGetVisit,
+  validateTicketAvailability,
+  calculatePurchaseTotal
+} from '@/services/anonymousPurchaseService';
+```
+
+## Anonymous purchase request body
+
+```json
+{
+  "email": "usuario@ejemplo.com",
+  "tickets": [
+    { "ticket_id": 1, "quantity": 2 }
+  ],
+  "visit_id": 123,
+  "payment_method": "CARD"
+}
+```
+
+## QR validation endpoints
+
+```bash
+# Validate a single QR
+GET /api/purchase-orders/validate-qr/?qr_data=<qr_json>
+
+# Validate multiple QR codes in one call
+POST /api/purchase-orders/validate-bulk-qr/
+Content-Type: application/json
+
+{ "qr_codes": ["<qr_data_1>", "<qr_data_2>"] }
+```
+
+A successful validation response:
+
+```json
+{
+  "valid": true,
+  "access_granted": true,
+  "status": "PAID",
+  "order_info": {
+    "confirmation_code": "ANON-ABC12345",
+    "customer_email": "cliente@email.com",
+    "visit_date": "2024-01-15",
+    "total_price": "\u20a125,000.00"
+  },
+  "message": "Acceso autorizado"
+}
+```
+
+## Purchase order model
+
+```python
+# backend/api/purchase_orders/models.py
+class PurchaseOrders(models.Model):
+    order_date    = models.DateField(auto_now_add=True)
+    total_price   = models.DecimalField(max_digits=12, decimal_places=2)
+    total_crc     = models.DecimalField(max_digits=12, decimal_places=2)
+    total_usd     = models.DecimalField(max_digits=12, decimal_places=2)
+    email         = models.EmailField(max_length=50)
+    qr_image      = models.ImageField(upload_to='qr_codes/', blank=True, null=True)
+    status        = models.CharField(
+        choices=[("PENDING","Pending"),("PAID","Paid"),("CANCELLED","Cancelled"),("FAILED","Failed")],
+        default="PENDING"
+    )
+    visit = models.ForeignKey('Visits', on_delete=models.CASCADE)
+    user  = models.ForeignKey(AUTH_USER_MODEL, null=True, blank=True)  # null for anonymous
+```
+
+<Warning>
+Anonymous purchasers have no order history in the platform. The confirmation code is the only way to retrieve the order. Advise buyers to save their email confirmation.
+</Warning>
+
+## Payment methods summary
+
+| Method | Backend string | Component |
+|--------|---------------|-----------|
+| Visa / Mastercard | `CARD` | `CardPayment` |
+| PayPal | `PAYPAL` | `PaypalPayment` |
+| SINPE Móvil | `CASH` | `CashPayment` |
+| Efectivo | `CASH` | `CashPayment` |

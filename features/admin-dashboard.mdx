@@ -1,0 +1,194 @@
+---
+title: 'Admin dashboard'
+description: 'Reference for the administrator dashboard: entity management, statistics, audit logs, role-based access, and institutional transparency reports at Parque Marino del Pacífico Sur.'
+keywords: ['admin', 'dashboard', 'audit log', 'roles', 'CRUD', 'transparencia']
+---
+
+The admin dashboard (`DashboardAdmin`) is a protected single-page interface that gives authenticated administrators full CRUD access to every entity in the system, live operational statistics, advanced filtering, and a complete audit log.
+
+<Warning>
+The admin layout (`AdminLayout.jsx`) is accessible only after a successful login. Unauthenticated requests are redirected. Role verification is performed via the `useUserRoles` hook before rendering sensitive controls.
+</Warning>
+
+## Dashboard overview
+
+`DashboardAdmin` (`frontend/src/components/admin/DashboardAdmin.jsx`) fetches all entity lists in parallel on mount:
+
+```javascript
+// DashboardAdmin.jsx — initial data load
+const [
+  sections, habitats, animals, tickets,
+  visits, orders, species, conservationStatus,
+  provinces, userProfiles, auditLog, exhibits,
+] = await Promise.all([
+  api.getSections(),
+  api.getHabitats(),
+  api.getAnimals(),
+  api.getTickets(),
+  api.getVisits(),
+  api.getPurchaseOrders(),
+  api.getSpecies(),
+  api.getConservationStatuses(),
+  api.getProvinces(),
+  api.getUsersProfiles(),
+  api.getAuditLog(),
+  api.getExhibits(),
+]);
+```
+
+## Statistics panel
+
+`DashboardStats` renders eight metric cards, each showing a live count and a simulated month-over-month growth indicator:
+
+| Metric | Icon | Data source |
+|--------|------|-------------|
+| Total usuarios | Users | `user-profiles` |
+| Total entradas | Ticket | `tickets` |
+| Total animales | Activity | `animals` |
+| Total visitas | Calendar | `visits` |
+| Total órdenes | ShoppingCart | `orders` |
+| Total especies | Star | `species` |
+| Total hábitats | Eye | `habitats` |
+| Total secciones | DollarSign | `sections` |
+
+Four derived metrics are also displayed:
+
+- **Densidad de población** — animals per habitat (`animals / habitats`)
+- **Tasa de ocupación** — visits as a percentage of total tickets
+- **Diversidad de especies** — unique species count
+- **Eficiencia operativa** — habitats per section, expressed as a percentage
+
+## Sidebar navigation and entity tabs
+
+The `DashboardSidebar` lists all entity tabs. The active tab drives the table, filter, and form shown in the main content area:
+
+| Tab key | Entity label | Editable fields |
+|---------|-------------|------------------|
+| `tickets` | Entrada | name, description, price, total_slots, currency |
+| `sections` | Sección | name |
+| `habitats` | Hábitat | name, nums_animals, description, section |
+| `animals` | Animal | name, age, species, conservation_status, habitat |
+| `visits` | Visita | day, total_slots |
+| `orders` | Orden | email, status, visit, user |
+| `species` | Especie | name, scientific_name, description, image |
+| `conservation-status` | Estado de Conservación | name (IUCN code) |
+| `provinces` | Provincia | name |
+| `user-profiles` | Perfil de Usuario | user, province, phone, address, birth_date, profile_picture, bio |
+| `audit-log` | Log de Auditoría | read-only |
+| `exhibits` | Exhibición | value, label, title |
+
+## CRUD operations
+
+Create, update, and delete are dispatched through three maps that route the active tab to the correct API function:
+
+```javascript
+// DashboardAdmin.jsx — operation maps (abbreviated)
+const deleteMap = {
+  section: api.deleteSection,   habitat: api.deleteHabitat,
+  animal:  api.deleteAnimal,    ticket:  api.deleteTicket,
+  visit:   api.deleteVisit,     purchaseOrder: api.deletePurchaseOrder,
+  species: api.deleteSpecies,   conservationStatus: api.deleteConservationStatus,
+  // ...
+};
+
+const updateMap = { /* mirrors deleteMap with update* functions */ };
+const createMap = { /* mirrors deleteMap with create* functions */ };
+```
+
+Before any create or update is submitted, the form values are validated against the appropriate Yup schema:
+
+```javascript
+const formConfigMap = {
+  tickets:              { config: ticketFormConfig,             schema: YupTicketSchema },
+  animals:              { config: animalFormConfig,             schema: YupAnimalSchema },
+  habitats:             { config: habitatFormConfig,            schema: YupHabitatSchema },
+  sections:             { config: sectionFormConfig,            schema: YupSectionSchema },
+  species:              { config: speciesFormConfig,            schema: YupSpeciesSchema },
+  'conservation-status':{ config: conservationStatusFormConfig, schema: YupConservationStatusSchema },
+  visits:               { config: visitFormConfig,              schema: YupVisitSchema },
+  orders:               { config: orderFormConfig,              schema: YupOrderSchema },
+  provinces:            { config: provinceFormConfig,           schema: YupProvinceSchema },
+  'user-profiles':      { config: userProfileFormConfig,        schema: YupUserProfileSchema },
+};
+```
+
+Entities with image fields (species, user profiles) use `multipart/form-data`. All others are sent as plain JSON.
+
+Delete operations require confirmation via a SweetAlert2 dialog before the API call is made.
+
+## Audit logs
+
+Every create and update action performed through the dashboard writes an entry to the audit log:
+
+```javascript
+// DashboardAdmin.jsx — after a successful save
+await api.createAuditLog({
+  action:     item?.id ? 'update' : 'create',
+  table_name: type,
+  record_id:  item?.id || result.id,
+  user:       user.id,
+  old_values: item?.id ? item : null,
+  new_values: values,
+});
+```
+
+The `AuditLog` Django model stores each entry:
+
+```python
+# backend/api/apiLog/models.py
+class AuditLog(models.Model):
+    timestamp  = models.DateTimeField(auto_now_add=True)
+    user       = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+    action     = models.CharField(max_length=255)
+    model      = models.CharField(max_length=255)
+    record_id  = models.PositiveIntegerField(null=True)
+    details    = models.TextField(blank=True, null=True)
+
+    class Meta:
+        ordering = ['-timestamp']
+```
+
+The `Logs` page (`frontend/src/pages/Admin/Logs.jsx`) fetches the log from `GET /api/admin/audit-logs/` and displays it in a table with columns: **ID**, **User**, **Action**, **Timestamp**.
+
+```javascript
+// Logs.jsx
+useEffect(() => {
+  const fetchLogs = async () => {
+    const response = await axiosInstance.get('/api/admin/audit-logs/');
+    setLogs(response.data);
+  };
+  fetchLogs();
+}, []);
+```
+
+<Info>
+Delete operations are not currently written to the audit log in `DashboardAdmin.handleDelete`. Only create and update actions produce audit entries.
+</Info>
+
+## Role-based access
+
+User roles are managed through Django's built-in `Group` model. Each `UserProfile` holds a many-to-many relation to groups:
+
+```python
+# backend/api/auth/models.py
+class UserProfile(models.Model):
+    user   = models.OneToOneField(User, on_delete=models.CASCADE)
+    roles  = models.ManyToManyField(Group, blank=True, related_name='user_profiles')
+    # phone, address, birth_date, profile_picture, bio, province ...
+```
+
+The frontend reads the current user's roles via the `useUserRoles` hook and passes `roleNames` to `DashboardSidebar` to control which sections are visible. The `AdminLayout` component applies an animated loading screen on entry to prevent flash-of-unauthenticated-content during the transition.
+
+## Institutional transparency
+
+The public-facing "Quiénes Somos" section includes a transparency hub powered by several tab components:
+
+| Component | Content |
+|-----------|----------|
+| `TabInformes` | Institutional transparency reports |
+| `TabDocumentos` | Official documents |
+| `TabCertificaciones` | Certifications |
+| `TabPoliticas` | Policies |
+| `TabOrganigramaTestimonios` | Organisation chart and testimonials |
+
+These tabs are part of the `TransparenciaTabs` component and are accessible to any visitor without authentication.

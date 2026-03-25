@@ -1,0 +1,264 @@
+---
+title: "Educational Services"
+description: "Manage educational service entries — workshops, guided visits, and environmental programs offered at the marine park."
+---
+
+Educational services (`ServiciosEducativos`) represent the hands-on programs offered at Parque Marino del Pacífico Sur. These include environmental awareness workshops, guided marine tours, and other interactive experiences designed for children and young students. The structure mirrors the Exhibits resource: a core record plus nested **images**, **facts**, **descriptions**, and **buttons**.
+
+The frontend `Servicios_Educativos` component fetches this data from `GET /api/servicios_educativos/` and renders it alongside ticket pricing information.
+
+<Note>
+  `GET` endpoints are publicly accessible without authentication. `POST`, `PUT`, and `DELETE` operations require an authenticated session with the `IsAuthenticatedOrReadOnly` permission policy (write operations require authentication; sub-resource writes additionally require `IsAuthenticatedAndRole`).
+</Note>
+
+---
+
+## The ServiciosEducativos object
+
+<ResponseField name="id" type="integer">
+  Unique identifier for the educational service.
+</ResponseField>
+
+<ResponseField name="value" type="string">
+  Internal machine-readable key (unique, max 255 characters). Used as a programmatic identifier.
+</ResponseField>
+
+<ResponseField name="label" type="string">
+  Short display label (unique, max 255 characters). Shown in navigation tabs and cards.
+</ResponseField>
+
+<ResponseField name="title" type="string">
+  Full title of the educational service (unique, max 255 characters). Rendered as a heading.
+</ResponseField>
+
+<ResponseField name="images" type="string[]">
+  Array of absolute URLs to the service's images. Files are stored under the `servicios-educativos/` media path.
+</ResponseField>
+
+<ResponseField name="facts" type="string[]">
+  Array of plain-text fact strings describing key highlights of the service.
+</ResponseField>
+
+<ResponseField name="descriptions" type="string[]">
+  Array of paragraph-length description strings. Rendered as body copy in the service detail view.
+</ResponseField>
+
+<ResponseField name="buttons" type="object[]">
+  Array of call-to-action button objects.
+  <Expandable title="Button object">
+    <ResponseField name="label" type="string">
+      Button display text (unique, max 255 characters).
+    </ResponseField>
+    <ResponseField name="link" type="string">
+      Target URL or internal route. Defaults to an empty string.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+## List educational services
+
+```http
+GET /api/servicios_educativos/
+```
+
+Returns all educational services with nested images, facts, descriptions, and buttons. No authentication required.
+
+**Example response**
+
+```json
+[
+  {
+    "id": 1,
+    "value": "taller-contaminacion",
+    "label": "Taller de Contaminación",
+    "title": "Taller de Contaminación Marina",
+    "images": [
+      "https://api.example.com/media/servicios-educativos/contaminacion_01.jpg"
+    ],
+    "facts": [
+      "Más de 8 millones de toneladas de plástico ingresan al océano cada año.",
+      "El taller incluye actividades prácticas de limpieza simulada."
+    ],
+    "descriptions": [
+      "Los participantes aprenden sobre el impacto del plástico en los ecosistemas marino-costeros a través de dinámicas grupales y experimentos visuales."
+    ],
+    "buttons": [
+      { "label": "Reservar", "link": "/servicios-educativos/taller-contaminacion" }
+    ]
+  }
+]
+```
+
+---
+
+## Create an educational service
+
+<Note>
+  Requires authentication.
+</Note>
+
+```http
+POST /api/servicios_educativos/create/
+```
+
+<ParamField body="value" type="string" required>
+  Internal key. Must be unique and no longer than 255 characters.
+</ParamField>
+
+<ParamField body="label" type="string" required>
+  Short display label. Must be unique and no longer than 255 characters.
+</ParamField>
+
+<ParamField body="title" type="string" required>
+  Full service title. Must be unique and no longer than 255 characters.
+</ParamField>
+
+**Example request body**
+
+```json
+{
+  "value": "visita-guiada",
+  "label": "Visita Guiada",
+  "title": "Visita Guiada al Parque Marino"
+}
+```
+
+**Example response** — `201 Created`
+
+```json
+{
+  "id": 2,
+  "value": "visita-guiada",
+  "label": "Visita Guiada",
+  "title": "Visita Guiada al Parque Marino",
+  "images": [],
+  "facts": [],
+  "descriptions": [],
+  "buttons": []
+}
+```
+
+---
+
+## Retrieve an educational service
+
+```http
+GET /api/servicios_educativos/{id}/
+```
+
+<ParamField path="id" type="integer" required>
+  The numeric ID of the educational service.
+</ParamField>
+
+---
+
+## Update an educational service
+
+<Note>
+  Requires authentication.
+</Note>
+
+```http
+PUT /api/servicios_educativos/{id}/update/
+```
+
+<ParamField path="id" type="integer" required>
+  The numeric ID of the service to update.
+</ParamField>
+
+<ParamField body="value" type="string">
+  Updated internal key.
+</ParamField>
+
+<ParamField body="label" type="string">
+  Updated display label.
+</ParamField>
+
+<ParamField body="title" type="string">
+  Updated title.
+</ParamField>
+
+---
+
+## Delete an educational service
+
+<Note>
+  Requires authentication. Cascades to all associated images, facts, descriptions, and buttons.
+</Note>
+
+```http
+DELETE /api/servicios_educativos/{id}/delete/
+```
+
+<ParamField path="id" type="integer" required>
+  The numeric ID of the service to delete.
+</ParamField>
+
+Returns `204 No Content` on success.
+
+---
+
+## Sub-resources
+
+Each educational service has four independently managed sub-resources. Sub-resource write operations (`POST`, `PUT`, `DELETE`) require `IsAuthenticatedAndRole`.
+
+### Images — `ServiciosEducativosImage`
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/servicios_educativos/imagenes/` | List all service images |
+| `POST` | `/api/servicios_educativos/imagenes/create/` | Upload a new image (admin) |
+| `GET` | `/api/servicios_educativos/imagenes/{id}/` | Retrieve a single image record |
+| `PUT` | `/api/servicios_educativos/imagenes/{id}/update/` | Replace an image (admin) |
+| `DELETE` | `/api/servicios_educativos/imagenes/{id}/delete/` | Remove an image (admin) |
+
+<ResponseField name="id" type="integer">Image record ID.</ResponseField>
+<ResponseField name="servicios_educativos" type="integer">Foreign key to the parent `ServiciosEducativos`.</ResponseField>
+<ResponseField name="image" type="string">Relative media path under `servicios-educativos/`.</ResponseField>
+<ResponseField name="created_at" type="datetime">ISO 8601 upload timestamp.</ResponseField>
+<ResponseField name="updated_at" type="datetime">ISO 8601 last-updated timestamp.</ResponseField>
+
+### Facts — `ServiciosEducativosFacts`
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/servicios_educativos/facts/` | List all facts |
+| `POST` | `/api/servicios_educativos/facts/create/` | Add a fact (admin) |
+| `GET` | `/api/servicios_educativos/facts/{id}/` | Retrieve a single fact |
+| `PUT` | `/api/servicios_educativos/facts/{id}/update/` | Update a fact (admin) |
+| `DELETE` | `/api/servicios_educativos/facts/{id}/delete/` | Remove a fact (admin) |
+
+<ResponseField name="id" type="integer">Fact record ID.</ResponseField>
+<ResponseField name="servicios_educativos" type="integer">Foreign key to the parent `ServiciosEducativos`.</ResponseField>
+<ResponseField name="fact" type="string">Plain-text fact content.</ResponseField>
+
+### Descriptions — `ServiciosEducativosDescription`
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/servicios_educativos/description/` | List all descriptions |
+| `POST` | `/api/servicios_educativos/description/create/` | Add a description (admin) |
+| `GET` | `/api/servicios_educativos/description/{id}/` | Retrieve a description |
+| `PUT` | `/api/servicios_educativos/description/{id}/update/` | Update a description (admin) |
+| `DELETE` | `/api/servicios_educativos/description/{id}/delete/` | Remove a description (admin) |
+
+<ResponseField name="id" type="integer">Description record ID.</ResponseField>
+<ResponseField name="servicios_educativos" type="integer">Foreign key to the parent `ServiciosEducativos`.</ResponseField>
+<ResponseField name="description" type="string">Paragraph-length description text.</ResponseField>
+
+### Buttons — `ServiciosEducativosButtons`
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/servicios_educativos/buttons/` | List all buttons |
+| `POST` | `/api/servicios_educativos/buttons/create/` | Add a button (admin) |
+| `GET` | `/api/servicios_educativos/buttons/{id}/` | Retrieve a button |
+| `PUT` | `/api/servicios_educativos/buttons/{id}/update/` | Update a button (admin) |
+| `DELETE` | `/api/servicios_educativos/buttons/{id}/delete/` | Remove a button (admin) |
+
+<ResponseField name="id" type="integer">Button record ID.</ResponseField>
+<ResponseField name="servicios_educativos" type="integer">Foreign key to the parent `ServiciosEducativos`.</ResponseField>
+<ResponseField name="label" type="string">Button display text (unique, max 255 characters).</ResponseField>
+<ResponseField name="link" type="string">Target URL or internal route. Defaults to an empty string.</ResponseField>

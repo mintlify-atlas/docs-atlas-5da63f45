@@ -1,0 +1,233 @@
+---
+title: "Documents"
+description: "Upload, retrieve, and manage transparency reports, PDFs, spreadsheets, and other public documents."
+---
+
+The Documents API manages the park's publicly accessible document library — transparency reports, regulatory filings, educational materials, and other files. Uploaded files are stored on the server's media storage (configured via Django's `MEDIA_ROOT`/`MEDIA_URL` settings, with Supabase Storage as the recommended remote backend). `file_type` and `file_size` are computed automatically at save time from the uploaded file.
+
+The backend also exposes an **experimental** `GET /api/documents/{id}/document_content/` endpoint that extracts and renders text content from PDF files (via `PyPDF2`) and Excel files (via `openpyxl`). This endpoint is currently marked as in development and is not production-ready.
+
+On the frontend, documents are rendered using `react-pdf`, which supports inline PDF preview without downloading.
+
+<Note>
+  No permission classes are enforced in the current codebase — all endpoints are currently accessible without authentication. Apply `IsAuthenticatedAndRole` or equivalent before deploying write operations to production.
+</Note>
+
+---
+
+## The Documents object
+
+<ResponseField name="id" type="integer">
+  Unique identifier for the document.
+</ResponseField>
+
+<ResponseField name="titulo" type="string">
+  Document title (max 255 characters). Maps to the `Título` admin label.
+</ResponseField>
+
+<ResponseField name="description" type="string">
+  Plain-text description of the document's content or purpose. Maps to the `Descripción` admin label.
+</ResponseField>
+
+<ResponseField name="fecha" type="string (date)">
+  Publication date in `YYYY-MM-DD` format. Records are ordered by descending `fecha` by default.
+</ResponseField>
+
+<ResponseField name="file_type" type="string">
+  File extension detected at upload time (e.g. `pdf`, `xlsx`, `docx`). Set automatically — do not send in requests.
+</ResponseField>
+
+<ResponseField name="file_size" type="string">
+  Human-readable file size computed at upload time (e.g. `1.24 MB`, `340.50 KB`). Set automatically — do not send in requests.
+</ResponseField>
+
+<ResponseField name="tipo" type="string">
+  Uppercased version of `file_type` (e.g. `PDF`, `XLSX`). Computed by the serializer.
+</ResponseField>
+
+<ResponseField name="peso" type="string">
+  Alias for `file_size` exposed by the serializer. Falls back to `N/A` if unknown.
+</ResponseField>
+
+<ResponseField name="url" type="string">
+  Absolute URL to download the document file. Constructed from the request context at serialization time.
+</ResponseField>
+
+---
+
+## List documents
+
+```http
+GET /api/documents/
+```
+
+Returns all documents ordered by publication date descending (most recent first).
+
+**Example response**
+
+```json
+[
+  {
+    "id": 3,
+    "titulo": "Informe de Transparencia 2024",
+    "description": "Reporte anual de gestión administrativa y financiera del Parque Marino del Pacífico Sur.",
+    "fecha": "2024-12-01",
+    "file_type": "pdf",
+    "file_size": "2.38 MB",
+    "tipo": "PDF",
+    "peso": "2.38 MB",
+    "url": "https://api.example.com/media/documentos/informe_transparencia_2024.pdf"
+  },
+  {
+    "id": 2,
+    "titulo": "Plan Operativo Anual 2024",
+    "description": "Detalle de actividades, metas e indicadores del año fiscal 2024.",
+    "fecha": "2024-01-15",
+    "file_type": "xlsx",
+    "file_size": "540.20 KB",
+    "tipo": "XLSX",
+    "peso": "540.20 KB",
+    "url": "https://api.example.com/media/documentos/poa_2024.xlsx"
+  }
+]
+```
+
+---
+
+## Upload a document
+
+```http
+POST /api/documents/
+```
+
+Uploads a new document. Must be sent as `multipart/form-data` because the request includes a file field. `file_type` and `file_size` are detected automatically from the uploaded file and must not be included in the request.
+
+<ParamField body="titulo" type="string" required>
+  Document title. Maximum 255 characters.
+</ParamField>
+
+<ParamField body="description" type="string" required>
+  Description of the document.
+</ParamField>
+
+<ParamField body="fecha" type="string" required>
+  Publication date in `YYYY-MM-DD` format.
+</ParamField>
+
+<ParamField body="document" type="file" required>
+  The file to upload. PDF files are supported for inline preview via `react-pdf` on the frontend. Excel files (`.xlsx`, `.xls`) are supported by the experimental content extraction endpoint. Files are stored under the `documentos/` media path.
+</ParamField>
+
+**Example response** — `201 Created`
+
+```json
+{
+  "id": 4,
+  "titulo": "Reglamento Interno 2025",
+  "description": "Reglamento de operación interna del parque, aprobado en enero de 2025.",
+  "fecha": "2025-01-10",
+  "file_type": "pdf",
+  "file_size": "891.00 KB",
+  "tipo": "PDF",
+  "peso": "891.00 KB",
+  "url": "https://api.example.com/media/documentos/reglamento_interno_2025.pdf"
+}
+```
+
+---
+
+## Retrieve a document
+
+```http
+GET /api/documents/{id}/
+```
+
+<ParamField path="id" type="integer" required>
+  The numeric ID of the document.
+</ParamField>
+
+---
+
+## Update a document
+
+```http
+PUT /api/documents/{id}/
+```
+
+```http
+PATCH /api/documents/{id}/
+```
+
+`PUT` replaces the full record. `PATCH` applies a partial update — only supply the fields you want to change.
+
+<ParamField path="id" type="integer" required>
+  The numeric ID of the document to update.
+</ParamField>
+
+<ParamField body="titulo" type="string">
+  Updated document title.
+</ParamField>
+
+<ParamField body="description" type="string">
+  Updated description.
+</ParamField>
+
+<ParamField body="fecha" type="string">
+  Updated publication date (`YYYY-MM-DD`).
+</ParamField>
+
+<ParamField body="document" type="file">
+  Replacement file. When provided, `file_type` and `file_size` are recomputed automatically.
+</ParamField>
+
+---
+
+## Delete a document
+
+```http
+DELETE /api/documents/{id}/
+```
+
+<ParamField path="id" type="integer" required>
+  The numeric ID of the document to delete.
+</ParamField>
+
+Returns `204 No Content` on success.
+
+---
+
+## Extract document content (experimental)
+
+```http
+GET /api/documents/{id}/document_content/
+```
+
+<Note>
+  This endpoint is marked as **in development** in the source code and is not production-ready. It renders extracted text as HTML via a Django template (`document_content.html`).
+</Note>
+
+Extracts and renders the text content of a stored document:
+
+- **PDF** — text is extracted page by page using `PyPDF2` and wrapped in `<p>` tags.
+- **Excel (`.xlsx` / `.xls`)** — all sheets are rendered as an HTML `<table>` using `openpyxl`.
+- **Other file types** — returns `400 Bad Request` with `{"error": "Unsupported file type."}`.
+
+<ParamField path="id" type="integer" required>
+  The numeric ID of the document whose content should be extracted.
+</ParamField>
+
+**Error responses**
+
+| Status | Body | Condition |
+|--------|------|-----------|
+| `400` | `{"error": "Unsupported file type."}` | File is not PDF or Excel |
+| `404` | `{"error": "Document not found."}` | No document with the given ID |
+| `500` | `{"error": "..."}` | Error reading or parsing the file |
+
+---
+
+## File storage
+
+Files uploaded via `POST /api/documents/` are written to the `documentos/` subdirectory within Django's configured media storage. For production deployments, the project uses **Supabase Storage** as the remote file backend, which means the `url` field in responses will resolve to a Supabase-hosted URL rather than a local server path.
+
+The frontend uses the `react-pdf` library to render PDF documents inline — no separate download is required for PDF previews.

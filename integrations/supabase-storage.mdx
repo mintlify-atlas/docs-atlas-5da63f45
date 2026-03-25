@@ -1,0 +1,356 @@
+---
+title: 'Supabase Storage'
+description: 'How Supabase Storage is used as the cloud media backend for species images, QR codes, documents, and other uploaded files.'
+keywords: ['supabase', 'storage', 'media', 'images', 'django', 's3', 'bucket']
+---
+
+The Django backend defaults to local filesystem storage (`media/`). Supabase Storage is the recommended cloud replacement for production, providing a global CDN, Row Level Security (RLS), and a REST API compatible with Django's `Storage` interface.
+
+---
+
+## What uses storage
+
+The following Django model fields write files to storage:
+
+| Model | Field | Upload path | Visibility |
+|-------|-------|-------------|------------|
+| `UserProfile` | `profile_picture` | `profile_pics/` | Private |
+| `Species` | `img` | `species/` | Public |
+| `ExhibicionImage` | `image` | `exhibitions/` | Public |
+| `PurchaseOrders` | `qr_image` | `qr_codes/` | Public |
+| `Documents` | `document` | `documentos/` | Private |
+| `ServiciosEducativos` | `image` | `servicios-educativos/` | Public |
+| `ProgramaEducativo` | `image` | `programas/` | Public |
+
+---
+
+## Environment variables
+
+```bash .env (backend)
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_API_KEY=<anon-or-service-key>
+SUPABASE_SERVICE_KEY=<service-role-key>
+SUPABASE_STORAGE_BUCKET=media-files
+ENVIRONMENT=production
+```
+
+<Warning>
+  Use the **service role key** (`SUPABASE_SERVICE_KEY`) only on the server — never expose it to the browser or commit it to source control. The anon key is safe for public bucket reads.
+</Warning>
+
+---
+
+## Installing dependencies
+
+```bash
+pip install supabase==2.3.4 requests python-magic Pillow
+# or use the requirements file included in the backend
+pip install -r requirements_supabase.txt
+```
+
+---
+
+## Django settings
+
+### Hybrid storage (recommended)
+
+Use local storage in development and Supabase in production:
+
+```python config/settings.py
+import os
+
+if os.getenv('ENVIRONMENT') == 'production':
+    DEFAULT_FILE_STORAGE = 'config.supabase_storage.SupabaseStorage'
+    MEDIA_URL = (
+        f"{os.getenv('SUPABASE_URL')}/storage/v1/object/public/"
+        f"{os.getenv('SUPABASE_STORAGE_BUCKET', 'media-files')}/"
+    )
+else:
+    DEFAULT_FILE_STORAGE = 'django.core.files.storage.FileSystemStorage'
+    MEDIA_URL = '/media/'
+    MEDIA_ROOT = BASE_DIR / 'media'
+
+SUPABASE_URL = os.getenv('SUPABASE_URL')
+SUPABASE_API_KEY = os.getenv('SUPABASE_API_KEY')
+SUPABASE_STORAGE_BUCKET = os.getenv('SUPABASE_STORAGE_BUCKET', 'media-files')
+```
+
+### django-storage-supabase (alternative)
+
+The `django-storage-supabase` package provides a drop-in `DEFAULT_FILE_STORAGE` backend:
+
+```bash
+pip install django-storage-supabase
+```
+
+```python config/settings.py
+DEFAULT_FILE_STORAGE = 'django_storage_supabase.supabase'
+SUPABASE_API_KEY = os.environ.get('SUPABASE_API_KEY')
+SUPABASE_URL = os.environ.get('SUPABASE_URL')
+SUPABASE_ROOT_PATH = '/media/'
+```
+
+<Note>
+  `django-storage-supabase` is currently in alpha. For production use, the custom `SupabaseStorage` class at `config/supabase_storage.py` is more reliable.
+</Note>
+
+---
+
+## Custom SupabaseStorage class
+
+The backend includes a hand-rolled `SupabaseStorage` class that implements the full Django `Storage` interface:
+
+```python config/supabase_storage.py
+from supabase import create_client, Client
+from django.conf import settings
+from django.core.files.storage import Storage
+from django.core.files.base import ContentFile
+
+class SupabaseStorage(Storage):
+    def __init__(self):
+        self.supabase: Client = create_client(
+            settings.SUPABASE_URL,
+            settings.SUPABASE_API_KEY
+        )
+        self.bucket_name = settings.SUPABASE_STORAGE_BUCKET
+
+    def _save(self, name, content):
+        try:
+            self.supabase.storage.from_(self.bucket_name).upload(
+                name, content.read()
+            )
+            return name
+        except Exception as e:
+            raise IOError(f"Error uploading file: {e}")
+
+    def _open(self, name, mode='rb'):
+        try:
+            response = self.supabase.storage.from_(self.bucket_name).download(name)
+            return ContentFile(response)
+        except Exception as e:
+            raise IOError(f"Error downloading file: {e}")
+
+    def delete(self, name):
+        self.supabase.storage.from_(self.bucket_name).remove([name])
+
+    def exists(self, name):
+        try:
+            files = self.supabase.storage.from_(self.bucket_name).list()
+            return any(file['name'] == name for file in files)
+        except:
+            return False
+
+    def url(self, name):
+        try:
+            response = self.supabase.storage.from_(self.bucket_name).get_public_url(name)
+            return response['publicURL']
+        except Exception as e:
+            return None
+```
+
+---
+
+## Creating buckets
+
+<Steps>
+  <Step title="Open the Storage section">
+    In your Supabase dashboard, go to **Storage** → **Buckets** and click **New bucket**.
+  </Step>
+  <Step title="Create the required buckets">
+    Create the following buckets. Mark public buckets as **Public** so files are accessible without a signed URL:
+
+    | Bucket name | Access |
+    |-------------|--------|
+    | `user-profiles` | Private |
+    | `species` | Public |
+    | `exhibitions` | Public |
+    | `qr-codes` | Public |
+    | `documents` | Private |
+    | `educational-services` | Public |
+    | `educational-programs` | Public |
+  </Step>
+  <Step title="Apply RLS policies">
+    Set Row Level Security policies (see [Security policies](#security-policies) below).
+  </Step>
+</Steps>
+
+---
+
+## Uploading and retrieving files
+
+### Automatic — via Django models
+
+No code changes are required in the models. Once `DEFAULT_FILE_STORAGE` is set, all `ImageField` and `FileField` saves route through Supabase automatically:
+
+```python models.py
+class Species(models.Model):
+    name = models.CharField(max_length=100)
+    img = models.ImageField(upload_to='species/')  # uploads to Supabase automatically
+```
+
+### Manual — using the storage class directly
+
+```python
+from config.supabase_storage import SupabaseStorage
+from django.core.files.base import ContentFile
+
+storage = SupabaseStorage()
+
+# Upload
+with open('photo.jpg', 'rb') as f:
+    saved_name = storage.save('species/photo.jpg', ContentFile(f.read(), name='photo.jpg'))
+
+# Get public URL
+url = storage.url(saved_name)
+
+# Check existence
+if storage.exists(saved_name):
+    print('File exists')
+
+# Delete
+storage.delete(saved_name)
+```
+
+### Type-specific storage instances
+
+```python
+from config.supabase_storage import (
+    profile_pics_storage,
+    species_storage,
+    documents_storage
+)
+
+species_storage.save('species/new-fish.jpg', file_content)
+documents_storage.save('docs/report.pdf', file_content)  # private bucket
+```
+
+---
+
+## Migrating existing local files
+
+The management command `migrate_to_supabase` uploads all local media files and updates database references:
+
+```bash
+# Dry run — no changes made
+python manage.py migrate_to_supabase --dry-run
+
+# Migrate all models with a local backup
+python manage.py migrate_to_supabase --backup
+
+# Migrate a single model
+python manage.py migrate_to_supabase --model Species --backup
+```
+
+The migration process:
+
+1. Creates a local backup in `media_backup/`
+2. Scans all models with file fields
+3. Uploads each file to Supabase, preserving directory structure
+4. Verifies each upload
+5. Updates the database reference to the new Supabase path
+
+---
+
+## Security policies
+
+Apply these RLS policies in the Supabase SQL editor (**SQL Editor** → **New query**):
+
+```sql
+-- Profile pictures: only the owning user can read or upload
+CREATE POLICY "Users can view own profile pictures" ON storage.objects
+FOR SELECT USING (
+    bucket_id = 'user-profiles'
+    AND auth.uid()::text = (storage.foldername(name))[1]
+);
+
+CREATE POLICY "Users can upload own profile pictures" ON storage.objects
+FOR INSERT WITH CHECK (
+    bucket_id = 'user-profiles'
+    AND auth.uid()::text = (storage.foldername(name))[1]
+);
+
+-- Public content: species, exhibitions, educational services
+CREATE POLICY "Public content is viewable by everyone" ON storage.objects
+FOR SELECT USING (
+    bucket_id IN ('species', 'exhibitions', 'educational-services')
+);
+
+-- Documents: authenticated users only
+CREATE POLICY "Authenticated users can view documents" ON storage.objects
+FOR SELECT USING (
+    bucket_id = 'documents'
+    AND auth.role() = 'authenticated'
+);
+
+-- Private per-user documents
+CREATE POLICY "Users can access own documents" ON storage.objects
+FOR ALL USING (
+    bucket_id = 'documents'
+    AND auth.uid()::text = (storage.foldername(name))[1]
+);
+```
+
+---
+
+## File validation
+
+The `SupabaseStorage` class validates uploads before sending them to Supabase:
+
+- **MIME type check** — rejects files that do not match the expected content type
+- **Size limit** — enforces a maximum file size per type
+- **Filename sanitisation** — strips dangerous characters from file names
+- **Path traversal prevention** — blocks `../` sequences in upload paths
+
+---
+
+## Debugging
+
+Enable verbose storage logs in `settings.py`:
+
+```python config/settings.py
+LOGGING = {
+    'version': 1,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'loggers': {
+        'supabase_storage': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+        },
+    },
+}
+```
+
+### Common errors
+
+<AccordionGroup>
+  <Accordion title="Invalid API key">
+    Verify that `SUPABASE_API_KEY` in `.env` is correct. For private bucket operations you may need the service role key (`SUPABASE_SERVICE_KEY`) instead of the anon key.
+  </Accordion>
+  <Accordion title="Bucket not found">
+    Check that the bucket name in `SUPABASE_STORAGE_BUCKET` matches exactly what you created in the dashboard (case-sensitive).
+  </Accordion>
+  <Accordion title="403 Forbidden when reading files">
+    The bucket is set to private or an RLS policy is blocking access. Either make the bucket public or add a `SELECT` policy for the relevant role.
+  </Accordion>
+  <Accordion title="Migration is slow">
+    Use `--model` to migrate one model at a time, or check your network connection. Large `MEDIA_ROOT` directories with thousands of files will take several minutes.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Running the storage tests
+
+```bash
+# Run the full Supabase storage test suite
+python manage.py test tests.test_supabase_storage
+
+# Run a specific test case
+python manage.py test tests.test_supabase_storage.SupabaseStorageTestCase.test_save_file_success
+```
+
+Test coverage includes upload, download, delete, URL generation, file existence checks, path traversal prevention, and bulk upload performance.

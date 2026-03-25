@@ -1,0 +1,225 @@
+---
+title: "Educational Programs"
+description: "Manage structured educational programs with associated curriculum items."
+---
+
+Educational programs (`ProgramaEducativo`) represent longer-form structured curricula offered by the park — distinct from the shorter workshop-style [Educational Services](/api/educational-services). A program has a title, a description, an optional cover image, and an ordered list of curriculum **items** (`ProgramaItem`). Items are replaced wholesale on update.
+
+The `EducationPrograms` frontend component renders these programs in the Servicios Educativos page.
+
+<Note>
+  No permission classes are configured on `ProgramaEducativoViewSet` or `ProgramaItemViewSet` in the current codebase, meaning all endpoints are accessible without authentication. Apply appropriate permissions before deploying to production.
+</Note>
+
+---
+
+## The ProgramaEducativo object
+
+<ResponseField name="id" type="integer">
+  Unique identifier for the program.
+</ResponseField>
+
+<ResponseField name="title" type="string">
+  Program title (max 100 characters).
+</ResponseField>
+
+<ResponseField name="description" type="string">
+  Full description of the program's goals, target audience, and content.
+</ResponseField>
+
+<ResponseField name="image" type="string | null">
+  URL or relative path to the program's cover image. Stored under the `programas/` media directory. `null` if no image has been uploaded.
+</ResponseField>
+
+<ResponseField name="items" type="object[]">
+  Ordered list of curriculum items nested within the program.
+  <Expandable title="ProgramaItem object">
+    <ResponseField name="id" type="integer">
+      Item record ID.
+    </ResponseField>
+    <ResponseField name="programa" type="integer">
+      Foreign key referencing the parent `ProgramaEducativo`.
+    </ResponseField>
+    <ResponseField name="text" type="string">
+      Item text — a topic, objective, or activity description (max 255 characters).
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+## List educational programs
+
+```http
+GET /api/programas_educativos/
+```
+
+Returns all programs with their nested items.
+
+**Example response**
+
+```json
+[
+  {
+    "id": 1,
+    "title": "Guardianes del Océano",
+    "description": "Programa de 8 semanas orientado a estudiantes de primaria. Combina visitas guiadas, talleres prácticos y proyectos de investigación marina.",
+    "image": "https://api.example.com/media/programas/guardianes_oceano.jpg",
+    "items": [
+      { "id": 1, "programa": 1, "text": "Introducción a los ecosistemas marinos" },
+      { "id": 2, "programa": 1, "text": "Biodiversidad del Pacífico Sur costarricense" },
+      { "id": 3, "programa": 1, "text": "Impacto del plástico en los océanos" },
+      { "id": 4, "programa": 1, "text": "Proyecto de limpieza de playa" }
+    ]
+  }
+]
+```
+
+---
+
+## Create a program
+
+```http
+POST /api/programas_educativos/create/
+```
+
+Items can be created inline with the parent program. On creation, each item in the `items` array is inserted and linked to the new program.
+
+<ParamField body="title" type="string" required>
+  Program title. Maximum 100 characters.
+</ParamField>
+
+<ParamField body="description" type="string" required>
+  Full description of the program.
+</ParamField>
+
+<ParamField body="image" type="file">
+  Optional cover image. Uploaded as `multipart/form-data`. Stored under `programas/`.
+</ParamField>
+
+<ParamField body="items" type="object[]">
+  Optional array of curriculum items to create together with the program.
+  <Expandable title="Item object">
+    <ParamField body="text" type="string" required>
+      Item text (max 255 characters).
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+**Example request body**
+
+```json
+{
+  "title": "Exploradores Marinos",
+  "description": "Programa de introducción a la biología marina para grupos escolares de secundaria.",
+  "items": [
+    { "text": "Historia del Parque Marino" },
+    { "text": "Especies en peligro de extinción" },
+    { "text": "Técnicas de observación subacuática" }
+  ]
+}
+```
+
+**Example response** — `201 Created`
+
+```json
+{
+  "id": 2,
+  "title": "Exploradores Marinos",
+  "description": "Programa de introducción a la biología marina para grupos escolares de secundaria.",
+  "image": null,
+  "items": [
+    { "id": 5, "programa": 2, "text": "Historia del Parque Marino" },
+    { "id": 6, "programa": 2, "text": "Especies en peligro de extinción" },
+    { "id": 7, "programa": 2, "text": "Técnicas de observación subacuática" }
+  ]
+}
+```
+
+---
+
+## Retrieve a program
+
+```http
+GET /api/programas_educativos/{id}/detail/
+```
+
+<ParamField path="id" type="integer" required>
+  The numeric ID of the program.
+</ParamField>
+
+---
+
+## Update a program
+
+```http
+PUT /api/programas_educativos/{id}/update/
+```
+
+<ParamField path="id" type="integer" required>
+  The numeric ID of the program to update.
+</ParamField>
+
+<ParamField body="title" type="string">
+  Updated title.
+</ParamField>
+
+<ParamField body="description" type="string">
+  Updated description.
+</ParamField>
+
+<ParamField body="image" type="file">
+  Replacement cover image.
+</ParamField>
+
+<ParamField body="items" type="object[]">
+  Replacement item list. **All existing items are deleted and replaced** with the items provided in this array. To preserve existing items, include them in the request.
+</ParamField>
+
+<Note>
+  The update serializer deletes all existing `ProgramaItem` records for the program before creating the new ones. Partial item updates are not supported — always send the complete desired item list.
+</Note>
+
+---
+
+## Delete a program
+
+```http
+DELETE /api/programas_educativos/{id}/delete/
+```
+
+<ParamField path="id" type="integer" required>
+  The numeric ID of the program to delete.
+</ParamField>
+
+Returns `204 No Content` on success. All associated `ProgramaItem` records are deleted via cascade.
+
+---
+
+## Program Items
+
+Items can also be managed independently via the `/items/` sub-endpoints.
+
+### The ProgramaItem object
+
+<ResponseField name="id" type="integer">Item record ID.</ResponseField>
+<ResponseField name="programa" type="integer">Foreign key to the parent `ProgramaEducativo`.</ResponseField>
+<ResponseField name="text" type="string">Curriculum item text (max 255 characters).</ResponseField>
+
+### Item endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/programas_educativos/items/` | List all items across all programs |
+| `POST` | `/api/programas_educativos/items/create/` | Create a standalone item |
+| `GET` | `/api/programas_educativos/items/{id}/detail/` | Retrieve a single item |
+| `PUT` | `/api/programas_educativos/items/{id}/update/` | Update an item |
+| `DELETE` | `/api/programas_educativos/items/{id}/delete/` | Delete an item |
+
+<ParamField body="programa" type="integer" required>
+  ID of the parent program when creating a standalone item.
+</ParamField>
+
+<ParamField body="text" type="string" required>
+  Item text. Maximum 255 characters.
+</ParamField>

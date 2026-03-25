@@ -1,0 +1,213 @@
+---
+title: "Tickets"
+description: "Manage ticket types for park entry. Public read access; write operations require admin authentication."
+---
+
+Tickets represent the different entry categories sold at Parque Marino del Pacífico Sur (General, Student, Child, etc.). Each ticket type tracks its own stock via `total_slots` and `occupied_slots`.
+
+## Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/tickets/` | Public | List all tickets |
+| `GET` | `/api/tickets/available/` | Public | List tickets with available stock |
+| `GET` | `/api/tickets/{id}/` | Public | Retrieve a single ticket |
+| `POST` | `/api/tickets/create/` | Admin | Create a new ticket |
+| `PUT` | `/api/tickets/{id}/update/` | Admin | Update a ticket |
+| `DELETE` | `/api/tickets/{id}/delete/` | Admin | Delete a ticket |
+
+---
+
+## GET /api/tickets/
+
+Returns all ticket types. No authentication required.
+
+```bash
+curl https://api.parquemarino.cr/api/tickets/
+```
+
+```json
+[
+  {
+    "id": 1,
+    "name": "Entrada General",
+    "description": "Acceso completo al parque marino",
+    "price": "15000.00",
+    "currency": "CRC",
+    "total_slots": 1276,
+    "occupied_slots": 42
+  },
+  {
+    "id": 2,
+    "name": "Entrada Estudiante",
+    "description": "Con carné estudiantil válido",
+    "price": "8000.00",
+    "currency": "CRC",
+    "total_slots": 1276,
+    "occupied_slots": 15
+  }
+]
+```
+
+---
+
+## GET /api/tickets/available/
+
+Returns only tickets with remaining stock (`total_slots - occupied_slots > 0`). Each object includes a computed `available_slots` field.
+
+<Note>
+  The `AvailableTicketsView` in the source references `is_active` as a filter, but the `Tickets` model does not define an `is_active` field — the serializer exposes all model fields (`fields = '__all__'`). If the database includes an `is_active` migration not yet reflected in the model file, this filter will apply; otherwise all tickets with available stock are returned.
+</Note>
+
+```bash
+curl https://api.parquemarino.cr/api/tickets/available/
+```
+
+### Response
+
+<ResponseField name="tickets" type="array">
+  Array of available ticket objects.
+  <Expandable title="Ticket object">
+    <ResponseField name="id" type="integer">
+      Unique ticket identifier.
+    </ResponseField>
+    <ResponseField name="name" type="string">
+      Display name of the ticket type (max 30 characters, unique).
+    </ResponseField>
+    <ResponseField name="description" type="string">
+      Short description shown to buyers (max 100 characters).
+    </ResponseField>
+    <ResponseField name="price" type="decimal">
+      Unit price with up to 10 digits and 2 decimal places.
+    </ResponseField>
+    <ResponseField name="currency" type="string">
+      Currency code: `CRC` (Costa Rican colones) or `USD` (US dollars).
+    </ResponseField>
+    <ResponseField name="total_slots" type="integer">
+      Maximum number of tickets available. Default `1276`.
+    </ResponseField>
+    <ResponseField name="occupied_slots" type="integer">
+      Number of tickets already sold or reserved.
+    </ResponseField>
+    <ResponseField name="available_slots" type="integer">
+      Computed field: `total_slots - occupied_slots`. Only included on this endpoint.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="total_available" type="integer">
+  Count of ticket types returned in this response.
+</ResponseField>
+
+```json
+{
+  "tickets": [
+    {
+      "id": 1,
+      "name": "Entrada General",
+      "description": "Acceso completo al parque marino",
+      "price": "15000.00",
+      "currency": "CRC",
+      "total_slots": 1276,
+      "occupied_slots": 42,
+      "available_slots": 1234
+    }
+  ],
+  "total_available": 1
+}
+```
+
+---
+
+## GET /api/tickets/{id}/
+
+Returns a single ticket by its primary key. No authentication required.
+
+### Path parameters
+
+<ParamField path="id" type="integer" required>
+  The numeric ID of the ticket.
+</ParamField>
+
+```bash
+curl https://api.parquemarino.cr/api/tickets/1/
+```
+
+---
+
+## POST /api/tickets/create/
+
+Creates a new ticket type. Requires admin authentication (`IsAuthenticatedAndRole`).
+
+<Warning>
+  This endpoint requires a valid admin JWT token in the `Authorization: Bearer <token>` header.
+</Warning>
+
+### Request body
+
+<ParamField body="name" type="string" required>
+  Unique display name for this ticket type. Maximum 30 characters.
+</ParamField>
+
+<ParamField body="description" type="string" required>
+  Short description shown during checkout. Maximum 100 characters.
+</ParamField>
+
+<ParamField body="price" type="decimal" required>
+  Unit price. Up to 10 total digits with 2 decimal places.
+</ParamField>
+
+<ParamField body="currency" type="string" default="CRC">
+  Currency for this ticket. Either `CRC` (colones) or `USD` (dollars).
+</ParamField>
+
+<ParamField body="total_slots" type="integer" default={1276}>
+  Maximum tickets available for this type.
+</ParamField>
+
+<ParamField body="occupied_slots" type="integer" default={0}>
+  Pre-occupied slots. Normally left at `0` on creation.
+</ParamField>
+
+```bash
+curl -X POST https://api.parquemarino.cr/api/tickets/create/ \
+  -H "Authorization: Bearer <admin_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Entrada Adulto Mayor",
+    "description": "Para personas mayores de 60 años",
+    "price": "7500.00",
+    "currency": "CRC",
+    "total_slots": 1276
+  }'
+```
+
+```json
+{
+  "id": 5,
+  "name": "Entrada Adulto Mayor",
+  "description": "Para personas mayores de 60 años",
+  "price": "7500.00",
+  "currency": "CRC",
+  "total_slots": 1276,
+  "occupied_slots": 0
+}
+```
+
+---
+
+## Model reference
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `integer` | Auto-generated primary key |
+| `name` | `string` | Unique ticket name, max 30 chars |
+| `description` | `string` | Buyer-facing description, max 100 chars |
+| `price` | `decimal(10,2)` | Unit price |
+| `currency` | `string` | `CRC` or `USD` |
+| `total_slots` | `integer` | Capacity ceiling, default `1276` |
+| `occupied_slots` | `integer` | Count of sold/reserved tickets, default `0` |
+
+<Note>
+  The `available` endpoint filters by `is_active=True` in the queryset. Inactive tickets are stored in the database but hidden from buyers.
+</Note>
